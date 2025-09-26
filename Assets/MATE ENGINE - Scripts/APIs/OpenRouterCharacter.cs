@@ -10,7 +10,7 @@ public class OpenRouterSettings
 {
     [Header("API Configuration")]
     public string apiKey = "";
-    public string model = "anthropic/claude-3.5-sonnet";
+    public string model = "deepseek/deepseek-chat-v3.1";
     
     [Header("Model Parameters")]
     [Range(0f, 2f)]
@@ -326,6 +326,26 @@ public class OpenRouterCharacter : MonoBehaviour
         File.WriteAllText(promptPath, newPrompt);
         
         Debug.Log("[OpenRouterCharacter] System prompt updated");
+    }
+
+    public void SetApiKey(string newApiKey)
+    {
+        settings.apiKey = newApiKey;
+        if (client != null)
+        {
+            UpdateClientSettings();
+        }
+        Debug.Log("[OpenRouterCharacter] API key updated");
+    }
+
+    public void SetModel(string newModel)
+    {
+        settings.model = newModel;
+        if (client != null)
+        {
+            UpdateClientSettings();
+        }
+        Debug.Log($"[OpenRouterCharacter] Model changed to: {newModel}");
     }
 
     void OnValidate()

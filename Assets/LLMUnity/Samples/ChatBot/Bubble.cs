@@ -5,7 +5,7 @@ using LLMUnity;
 
 namespace LLMUnitySamples
 {
-    struct BubbleUI
+    public struct BubbleUI
     {
         public Sprite sprite;
         public Font font;
@@ -35,7 +35,7 @@ namespace LLMUnitySamples
         }
     }
 
-    class Bubble
+    public class Bubble
     {
         protected GameObject bubbleObject;
         protected GameObject imageObject;
@@ -162,7 +162,7 @@ namespace LLMUnitySamples
         }
     }
 
-    class InputBubble : Bubble
+    public class InputBubble : Bubble
     {
         protected GameObject inputFieldObject;
         protected InputField inputField;

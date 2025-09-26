@@ -26,12 +26,12 @@ namespace LLMUnitySamples
         public Material aiMaterial;
 
 
-        private InputBubble inputBubble;
-        private List<Bubble> chatBubbles = new List<Bubble>();
-        private bool blockInput = true;
-        private BubbleUI playerUI, aiUI;
-        private bool warmUpDone = false;
-        private int lastBubbleOutsideFOV = -1;
+        protected InputBubble inputBubble;
+        protected List<Bubble> chatBubbles = new List<Bubble>();
+        protected bool blockInput = true;
+        protected BubbleUI playerUI, aiUI;
+        protected bool warmUpDone = false;
+        protected int lastBubbleOutsideFOV = -1;
 
         [Header("Input Settings")]
         public string inputPlaceholder = "Message me";
@@ -54,7 +54,7 @@ namespace LLMUnitySamples
         public ScrollRect scrollRect; // Assign in Inspector
 
 
-        void Start()
+               protected virtual void Start()
         {
             if (font == null) font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
             playerUI = new BubbleUI
@@ -119,7 +119,7 @@ namespace LLMUnitySamples
         }
 
 
-        Bubble AddBubble(string message, bool isPlayerMessage)
+        protected Bubble AddBubble(string message, bool isPlayerMessage)
         {
             Bubble bubble = new Bubble(chatContainer, isPlayerMessage ? playerUI : aiUI, isPlayerMessage ? "PlayerBubble" : "AIBubble", message);
             chatBubbles.Add(bubble);
@@ -149,7 +149,7 @@ namespace LLMUnitySamples
             for (int i=1; i<llmCharacter.chat.Count; i++) AddBubble(llmCharacter.chat[i].content, i%2==1);
         }
 
-        void onInputFieldSubmit(string newText)
+        protected virtual void onInputFieldSubmit(string newText)
         {
             inputBubble.ActivateInputField();
             if (blockInput || newText.Trim() == "" || Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
@@ -178,7 +178,7 @@ namespace LLMUnitySamples
             inputBubble.SetText("");
         }
 
-        private IEnumerator FadeOutStreamAudio(float duration = 0.5f)
+        protected IEnumerator FadeOutStreamAudio(float duration = 0.5f)
         {
             float startVolume = streamAudioSource.volume;
 
@@ -213,7 +213,7 @@ namespace LLMUnitySamples
             AllowInput();
         }
 
-        IEnumerator<string> BlockInteraction()
+        protected IEnumerator<string> BlockInteraction()
         {
             // prevent from change until next frame
             inputBubble.setInteractable(false);
