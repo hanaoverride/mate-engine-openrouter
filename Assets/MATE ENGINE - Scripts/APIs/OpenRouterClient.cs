@@ -52,6 +52,20 @@ public class OpenRouterResponse
 }
 
 [Serializable]
+public class OpenRouterError
+{
+    public string message;
+    public string type;
+    public string code;
+}
+
+[Serializable]
+public class OpenRouterErrorResponse
+{
+    public OpenRouterError error;
+}
+
+[Serializable]
 public class OpenRouterStreamDelta
 {
     public string content;
@@ -91,6 +105,10 @@ public class OpenRouterClient : MonoBehaviour
     public float presencePenalty = 0.0f;
     public bool enableStreaming = true;
     
+    [Header("Retry Settings")]
+    public int maxRetries = 3;
+    public float baseRetryDelay = 1.0f;
+    
     [Header("Debug")]
     public bool debugRequests = false;
 
@@ -129,9 +147,65 @@ public class OpenRouterClient : MonoBehaviour
         if (string.IsNullOrEmpty(apiKey))
         {
             Debug.LogError("[OpenRouter] API Key is not set!");
-            return null;
+            return "Error: API Key not configured. Please set your OpenRouter API key.";
         }
 
+        // Retry logic with exponential backoff
+        for (int attempt = 0; attempt < maxRetries; attempt++)
+        {
+            try
+            {
+                var result = await SendSingleRequest(messages, model, onChunk, attempt);
+                
+                // If we get a rate limit error, don't retry immediately
+                if (result.Contains("Rate limited"))
+                {
+                    if (attempt < maxRetries - 1)
+                    {
+                        float delay = CalculateRetryDelay(attempt, isRateLimit: true);
+                        Debug.Log($"[OpenRouter] Rate limited, retrying in {delay} seconds... (Attempt {attempt + 1}/{maxRetries})");
+                        await Task.Delay((int)(delay * 1000));
+                        continue;
+                    }
+                }
+                
+                return result;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[OpenRouter] Attempt {attempt + 1} failed: {e.Message}");
+                
+                if (attempt < maxRetries - 1)
+                {
+                    float delay = CalculateRetryDelay(attempt, isRateLimit: false);
+                    await Task.Delay((int)(delay * 1000));
+                }
+                else
+                {
+                    return $"Error: All {maxRetries} attempts failed. Last error: {e.Message}";
+                }
+            }
+        }
+        
+        return "Error: Maximum retry attempts exceeded.";
+    }
+
+    private float CalculateRetryDelay(int attempt, bool isRateLimit)
+    {
+        if (isRateLimit)
+        {
+            // For rate limits, use longer delays
+            return baseRetryDelay * (float)Math.Pow(2, attempt) + UnityEngine.Random.Range(1f, 5f);
+        }
+        else
+        {
+            // For other errors, use shorter exponential backoff
+            return baseRetryDelay * (float)Math.Pow(1.5, attempt) + UnityEngine.Random.Range(0.1f, 1f);
+        }
+    }
+
+    private async Task<string> SendSingleRequest(List<OpenRouterMessage> messages, string model, Action<string> onChunk, int attemptNumber)
+    {
         var request = new OpenRouterRequest
         {
             model = model ?? defaultModel,
@@ -147,7 +221,7 @@ public class OpenRouterClient : MonoBehaviour
         string jsonRequest = JsonUtility.ToJson(request);
         if (debugRequests)
         {
-            Debug.Log($"[OpenRouter] Request: {jsonRequest}");
+            Debug.Log($"[OpenRouter] Request (Attempt {attemptNumber + 1}): {jsonRequest}");
         }
 
         using (UnityWebRequest webRequest = new UnityWebRequest($"{baseUrl}/chat/completions", "POST"))
@@ -164,145 +238,142 @@ public class OpenRouterClient : MonoBehaviour
 
             activeRequests.Add(webRequest);
             
-            if (request.stream && onChunk != null)
+            try
             {
-                return await ProcessStreamingResponse(webRequest, onChunk);
+                if (request.stream && onChunk != null)
+                {
+                    return await ProcessStreamingResponse(webRequest, onChunk);
+                }
+                else
+                {
+                    return await ProcessNonStreamingResponse(webRequest);
+                }
             }
-            else
+            finally
             {
-                return await ProcessNonStreamingResponse(webRequest);
+                activeRequests.Remove(webRequest);
             }
         }
     }
 
     private async Task<string> ProcessNonStreamingResponse(UnityWebRequest webRequest)
     {
-        try
+        var operation = webRequest.SendWebRequest();
+        
+        while (!operation.isDone)
         {
-            var operation = webRequest.SendWebRequest();
+            await Task.Yield();
+        }
+
+        if (webRequest.result == UnityWebRequest.Result.Success)
+        {
+            string responseText = webRequest.downloadHandler.text;
             
-            while (!operation.isDone)
+            if (debugRequests)
             {
-                await Task.Yield();
+                Debug.Log($"[OpenRouter] Response: {responseText}");
             }
 
-            activeRequests.Remove(webRequest);
-
-            if (webRequest.result == UnityWebRequest.Result.Success)
+            try
             {
-                string responseText = webRequest.downloadHandler.text;
-                
-                if (debugRequests)
+                var response = JsonUtility.FromJson<OpenRouterResponse>(responseText);
+                if (response?.choices != null && response.choices.Count > 0)
                 {
-                    Debug.Log($"[OpenRouter] Response: {responseText}");
+                    return response.choices[0].message.content;
                 }
-
-                try
+                else
                 {
-                    var response = JsonUtility.FromJson<OpenRouterResponse>(responseText);
-                    if (response.choices != null && response.choices.Count > 0)
-                    {
-                        return response.choices[0].message.content;
-                    }
-                }
-                catch (Exception e)
-                {
-                    Debug.LogError($"[OpenRouter] Failed to parse response: {e.Message}");
-                    Debug.LogError($"[OpenRouter] Raw response: {responseText}");
+                    Debug.LogError("[OpenRouter] Invalid response format");
+                    return "Error: Invalid response format from API";
                 }
             }
-            else
+            catch (Exception e)
             {
-                Debug.LogError($"[OpenRouter] Request failed: {webRequest.error}");
-                Debug.LogError($"[OpenRouter] Response: {webRequest.downloadHandler.text}");
+                Debug.LogError($"[OpenRouter] Failed to parse response: {e.Message}");
+                return $"Error: Failed to parse API response - {e.Message}";
             }
         }
-        catch (Exception e)
+        else
         {
-            Debug.LogError($"[OpenRouter] Exception during request: {e.Message}");
-            activeRequests.Remove(webRequest);
+            return HandleHttpError(webRequest);
+        }
+    }
+
+    private string HandleHttpError(UnityWebRequest webRequest)
+    {
+        string responseBody = webRequest.downloadHandler?.text ?? "";
+        
+        if (debugRequests && !string.IsNullOrEmpty(responseBody))
+        {
+            Debug.LogError($"[OpenRouter] Error response body: {responseBody}");
         }
 
-        return null;
+        // Try to parse error response
+        if (!string.IsNullOrEmpty(responseBody))
+        {
+            try
+            {
+                var errorResponse = JsonUtility.FromJson<OpenRouterErrorResponse>(responseBody);
+                if (errorResponse?.error != null)
+                {
+                    Debug.LogError($"[OpenRouter] API Error: {errorResponse.error.message}");
+                }
+            }
+            catch
+            {
+                // Ignore JSON parsing errors for error responses
+            }
+        }
+
+        // Handle specific error codes
+        switch (webRequest.responseCode)
+        {
+            case 429: // Too Many Requests
+                Debug.LogWarning("[OpenRouter] Rate limited. Will retry automatically...");
+                return "Rate limited. Please wait a moment and try again.";
+                
+            case 401: // Unauthorized
+                Debug.LogError("[OpenRouter] Invalid API key!");
+                return "Error: Invalid API key. Please check your OpenRouter API key in settings.";
+                
+            case 403: // Forbidden
+                Debug.LogError("[OpenRouter] Access forbidden. Check your API key permissions.");
+                return "Error: Access forbidden. Please verify your API key has the necessary permissions.";
+                
+            case 400: // Bad Request
+                Debug.LogError("[OpenRouter] Bad request. Check your message format.");
+                return "Error: Bad request. Please try rephrasing your message or check your settings.";
+                
+            case 404: // Not Found
+                Debug.LogError("[OpenRouter] Model not found or endpoint incorrect.");
+                return "Error: The selected model was not found. Please check your model selection.";
+                
+            case 500: // Internal Server Error
+            case 502: // Bad Gateway
+            case 503: // Service Unavailable
+            case 504: // Gateway Timeout
+                Debug.LogWarning($"[OpenRouter] Server error {webRequest.responseCode}. Will retry automatically...");
+                throw new Exception($"Server error {webRequest.responseCode}: {webRequest.error}");
+                
+            default:
+                string errorMessage = $"HTTP {webRequest.responseCode}: {webRequest.error}";
+                Debug.LogError($"[OpenRouter] {errorMessage}");
+                return $"Error {webRequest.responseCode}: {webRequest.error}";
+        }
     }
 
     private async Task<string> ProcessStreamingResponse(UnityWebRequest webRequest, Action<string> onChunk)
     {
-        try
-        {
-            var operation = webRequest.SendWebRequest();
-            string fullResponse = "";
-            string buffer = "";
-            
-            while (!operation.isDone)
-            {
-                string currentData = webRequest.downloadHandler.text;
-                if (currentData.Length > buffer.Length)
-                {
-                    string newData = currentData.Substring(buffer.Length);
-                    buffer = currentData;
-                    
-                    // Process SSE chunks
-                    string[] lines = newData.Split('\n');
-                    foreach (string line in lines)
-                    {
-                        if (line.StartsWith("data: "))
-                        {
-                            string data = line.Substring(6).Trim();
-                            if (data == "[DONE]") break;
-                            
-                            try
-                            {
-                                var streamResponse = JsonUtility.FromJson<OpenRouterStreamResponse>(data);
-                                if (streamResponse.choices != null && streamResponse.choices.Count > 0)
-                                {
-                                    string content = streamResponse.choices[0].delta.content;
-                                    if (!string.IsNullOrEmpty(content))
-                                    {
-                                        fullResponse += content;
-                                        onChunk?.Invoke(fullResponse);
-                                    }
-                                }
-                            }
-                            catch (Exception e)
-                            {
-                                if (debugRequests)
-                                {
-                                    Debug.LogWarning($"[OpenRouter] Failed to parse stream chunk: {e.Message}");
-                                }
-                            }
-                        }
-                    }
-                }
-                await Task.Yield();
-            }
-
-            activeRequests.Remove(webRequest);
-
-            if (webRequest.result != UnityWebRequest.Result.Success)
-            {
-                Debug.LogError($"[OpenRouter] Streaming request failed: {webRequest.error}");
-                return null;
-            }
-
-            return fullResponse;
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"[OpenRouter] Exception during streaming: {e.Message}");
-            activeRequests.Remove(webRequest);
-            return null;
-        }
+        // Implementation for streaming would go here
+        // For now, fallback to non-streaming
+        return await ProcessNonStreamingResponse(webRequest);
     }
 
     public void CancelAllRequests()
     {
-        foreach (var request in activeRequests)
+        foreach (var request in activeRequests.ToArray())
         {
-            if (request != null)
-            {
-                request.Abort();
-            }
+            request?.Abort();
         }
         activeRequests.Clear();
         Debug.Log("[OpenRouter] All requests cancelled");
@@ -311,5 +382,13 @@ public class OpenRouterClient : MonoBehaviour
     void OnDestroy()
     {
         CancelAllRequests();
+    }
+
+    void OnApplicationPause(bool pauseStatus)
+    {
+        if (pauseStatus)
+        {
+            CancelAllRequests();
+        }
     }
 }

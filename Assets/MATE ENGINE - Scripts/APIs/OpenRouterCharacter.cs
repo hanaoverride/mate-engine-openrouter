@@ -175,12 +175,12 @@ public class OpenRouterCharacter : MonoBehaviour
         if (isProcessing)
         {
             Debug.LogWarning("[OpenRouterCharacter] Already processing a request. Please wait...");
-            return null;
+            return "Please wait for the current request to complete.";
         }
 
         if (string.IsNullOrEmpty(userMessage.Trim()))
         {
-            return null;
+            return "Please enter a message.";
         }
 
         await chatLock.WaitAsync();
@@ -197,6 +197,70 @@ public class OpenRouterCharacter : MonoBehaviour
             
             // Update client settings before request
             UpdateClientSettings();
+            
+            // Send request to OpenRouter with improved error handling
+            response = await client.SendChatRequest(apiMessages, settings.model, onPartialResponse);
+            
+            // Check if response indicates an error
+            if (!string.IsNullOrEmpty(response))
+            {
+                if (response.StartsWith("Error:") || response.StartsWith("Rate limited"))
+                {
+                    // Don't add error messages to chat history
+                    // Remove the user message we just added since the request failed
+                    if (chatHistory.Count > 0 && chatHistory[chatHistory.Count - 1].content == userMessage)
+                    {
+                        chatHistory.RemoveAt(chatHistory.Count - 1);
+                    }
+                    
+                    Debug.LogWarning($"[OpenRouterCharacter] Request failed: {response}");
+                    return response;
+                }
+                else
+                {
+                    // Add AI response to history
+                    AddMessage(aiName, response);
+                    
+                    // Save history after successful response
+                    SaveHistory();
+                    
+                    Debug.Log($"[OpenRouterCharacter] Response received: {response.Substring(0, Math.Min(50, response.Length))}...");
+                }
+            }
+            else
+            {
+                // Empty response - treat as error
+                response = "No response received from the AI. Please try again.";
+                
+                // Remove the user message since request failed
+                if (chatHistory.Count > 0 && chatHistory[chatHistory.Count - 1].content == userMessage)
+                {
+                    chatHistory.RemoveAt(chatHistory.Count - 1);
+                }
+            }
+        }
+        catch (System.Exception e)
+        {
+            // Remove the user message from history if an exception occurred
+            if (chatHistory.Count > 0 && chatHistory[chatHistory.Count - 1].content == userMessage)
+            {
+                chatHistory.RemoveAt(chatHistory.Count - 1);
+            }
+            
+            response = $"An error occurred: {e.Message}";
+            Debug.LogError($"[OpenRouterCharacter] Chat request failed: {e.Message}\n{e.StackTrace}");
+        }
+        finally
+        {
+            isProcessing = false;
+            chatLock.Release();
+            
+            // Always call completion callback
+            onComplete?.Invoke();
+        }
+
+        return response;
+    }
             
             // Send request to OpenRouter
             if (settings.enableStreaming && onPartialResponse != null)
