@@ -129,7 +129,21 @@ public class OpenRouterClient : MonoBehaviour
 
     private void LoadApiKey()
     {
-        // 먼저 PlayerPrefs에서 확인
+        // 먼저 settings.json에서 확인
+        if (SaveLoadHandler.Instance != null)
+        {
+            string fileKey = SaveLoadHandler.Instance.data.openRouterApiKey;
+            if (!string.IsNullOrEmpty(fileKey))
+            {
+                apiKey = fileKey;
+                PlayerPrefs.SetString("OpenRouter_API_Key", apiKey);
+                PlayerPrefs.Save();
+                Debug.Log("[OpenRouter] API Key loaded from settings.json");
+                return;
+            }
+        }
+
+        // 그 다음 PlayerPrefs 확인
         if (PlayerPrefs.HasKey("OpenRouter_API_Key"))
         {
             apiKey = PlayerPrefs.GetString("OpenRouter_API_Key");
@@ -147,6 +161,12 @@ public class OpenRouterClient : MonoBehaviour
         PlayerPrefs.SetString("OpenRouter_API_Key", key);
         PlayerPrefs.Save();
         Debug.Log("[OpenRouter] API Key saved");
+
+        if (SaveLoadHandler.Instance != null)
+        {
+            SaveLoadHandler.Instance.data.openRouterApiKey = key;
+            SaveLoadHandler.Instance.SaveToDisk();
+        }
     }
 
     public async Task<string> SendChatRequest(List<OpenRouterMessage> messages, string model = null, Action<string> onChunk = null)

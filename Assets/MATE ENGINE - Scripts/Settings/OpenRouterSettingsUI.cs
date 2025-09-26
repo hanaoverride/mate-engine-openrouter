@@ -106,11 +106,13 @@ public class OpenRouterSettingsUI : MonoBehaviour
 
     private void LoadSettings()
     {
+        var saveData = SaveLoadHandler.Instance?.data;
+
         // Load OpenRouter Enable Toggle
         if (enableOpenRouterToggle != null)
         {
             // Default to enabled (1) if no setting exists yet
-            bool enabled = PlayerPrefs.GetInt("OpenRouter_Enabled", 1) == 1;
+            bool enabled = saveData?.openRouterEnabled ?? (PlayerPrefs.GetInt("OpenRouter_Enabled", 1) == 1);
             enableOpenRouterToggle.isOn = enabled;
             Debug.Log($"[OpenRouterSettingsUI] Loaded OpenRouter_Enabled: {enabled} (raw value: {PlayerPrefs.GetInt("OpenRouter_Enabled", -999)})");
         }
@@ -118,7 +120,7 @@ public class OpenRouterSettingsUI : MonoBehaviour
         // Load API Key
         if (apiKeyField != null)
         {
-            string savedApiKey = PlayerPrefs.GetString("OpenRouter_API_Key", "");
+            string savedApiKey = saveData?.openRouterApiKey ?? PlayerPrefs.GetString("OpenRouter_API_Key", "");
             apiKeyField.text = string.IsNullOrEmpty(savedApiKey) ? "" : "••••••••••••••••"; // Masked display
             apiKeyField.contentType = InputField.ContentType.Password;
         }
@@ -126,7 +128,9 @@ public class OpenRouterSettingsUI : MonoBehaviour
         // Load Model Selection
         if (modelDropdown != null)
         {
-            string savedModel = PlayerPrefs.GetString("OpenRouter_Model", "deepseek/deepseek-chat-v3.1");
+            string savedModel = saveData != null && !string.IsNullOrEmpty(saveData.openRouterModel)
+                ? saveData.openRouterModel
+                : PlayerPrefs.GetString("OpenRouter_Model", "deepseek/deepseek-chat-v3.1");
             int modelIndex = 0;
             var modelKeys = new List<string>(availableModels.Keys);
             for (int i = 0; i < modelKeys.Count; i++)
@@ -143,7 +147,7 @@ public class OpenRouterSettingsUI : MonoBehaviour
         // Load Temperature
         if (temperatureSlider != null)
         {
-            float temperature = PlayerPrefs.GetFloat("OpenRouter_Temperature", 0.7f);
+            float temperature = saveData?.openRouterTemperature ?? PlayerPrefs.GetFloat("OpenRouter_Temperature", 0.7f);
             temperatureSlider.value = temperature;
             OnTemperatureChanged(temperature);
         }
@@ -151,7 +155,7 @@ public class OpenRouterSettingsUI : MonoBehaviour
         // Load Max Tokens
         if (maxTokensSlider != null)
         {
-            float maxTokens = PlayerPrefs.GetFloat("OpenRouter_MaxTokens", 1000f);
+            float maxTokens = saveData?.openRouterMaxTokens ?? PlayerPrefs.GetFloat("OpenRouter_MaxTokens", 1000f);
             maxTokensSlider.value = maxTokens;
             OnMaxTokensChanged(maxTokens);
         }
@@ -159,14 +163,14 @@ public class OpenRouterSettingsUI : MonoBehaviour
         // Load Streaming Toggle
         if (streamingToggle != null)
         {
-            bool streaming = PlayerPrefs.GetInt("OpenRouter_Streaming", 1) == 1;
+            bool streaming = saveData?.openRouterStreaming ?? (PlayerPrefs.GetInt("OpenRouter_Streaming", 1) == 1);
             streamingToggle.isOn = streaming;
         }
 
         // Load Debug Toggle
         if (debugToggle != null)
         {
-            bool debug = PlayerPrefs.GetInt("OpenRouter_Debug", 0) == 1;
+            bool debug = saveData?.openRouterDebug ?? (PlayerPrefs.GetInt("OpenRouter_Debug", 0) == 1);
             debugToggle.isOn = debug;
         }
 
@@ -202,16 +206,27 @@ public class OpenRouterSettingsUI : MonoBehaviour
     {
         try
         {
+            var saveData = SaveLoadHandler.Instance?.data;
+
             // Save OpenRouter Enable Toggle
             if (enableOpenRouterToggle != null)
             {
-                PlayerPrefs.SetInt("OpenRouter_Enabled", enableOpenRouterToggle.isOn ? 1 : 0);
+                bool enabled = enableOpenRouterToggle.isOn;
+                PlayerPrefs.SetInt("OpenRouter_Enabled", enabled ? 1 : 0);
+                if (saveData != null)
+                {
+                    saveData.openRouterEnabled = enabled;
+                }
             }
 
             // Save API Key (only if it's not the masked version)
             if (apiKeyField != null && !apiKeyField.text.Contains("••"))
             {
                 PlayerPrefs.SetString("OpenRouter_API_Key", apiKeyField.text);
+                if (saveData != null)
+                {
+                    saveData.openRouterApiKey = apiKeyField.text;
+                }
             }
 
             // Save Model
@@ -220,35 +235,65 @@ public class OpenRouterSettingsUI : MonoBehaviour
                 var modelKeys = new List<string>(availableModels.Keys);
                 if (modelDropdown.value < modelKeys.Count)
                 {
-                    PlayerPrefs.SetString("OpenRouter_Model", modelKeys[modelDropdown.value]);
+                    string selectedModel = modelKeys[modelDropdown.value];
+                    PlayerPrefs.SetString("OpenRouter_Model", selectedModel);
+                    if (saveData != null)
+                    {
+                        saveData.openRouterModel = selectedModel;
+                    }
                 }
             }
 
             // Save Temperature
             if (temperatureSlider != null)
             {
-                PlayerPrefs.SetFloat("OpenRouter_Temperature", temperatureSlider.value);
+                float temperature = temperatureSlider.value;
+                PlayerPrefs.SetFloat("OpenRouter_Temperature", temperature);
+                if (saveData != null)
+                {
+                    saveData.openRouterTemperature = temperature;
+                }
             }
 
             // Save Max Tokens
             if (maxTokensSlider != null)
             {
-                PlayerPrefs.SetFloat("OpenRouter_MaxTokens", maxTokensSlider.value);
+                float maxTokens = maxTokensSlider.value;
+                PlayerPrefs.SetFloat("OpenRouter_MaxTokens", maxTokens);
+                if (saveData != null)
+                {
+                    saveData.openRouterMaxTokens = maxTokens;
+                }
             }
 
             // Save Streaming
             if (streamingToggle != null)
             {
-                PlayerPrefs.SetInt("OpenRouter_Streaming", streamingToggle.isOn ? 1 : 0);
+                bool streaming = streamingToggle.isOn;
+                PlayerPrefs.SetInt("OpenRouter_Streaming", streaming ? 1 : 0);
+                if (saveData != null)
+                {
+                    saveData.openRouterStreaming = streaming;
+                }
             }
 
             // Save Debug
             if (debugToggle != null)
             {
-                PlayerPrefs.SetInt("OpenRouter_Debug", debugToggle.isOn ? 1 : 0);
+                bool debugMode = debugToggle.isOn;
+                PlayerPrefs.SetInt("OpenRouter_Debug", debugMode ? 1 : 0);
+                if (saveData != null)
+                {
+                    saveData.openRouterDebug = debugMode;
+                }
             }
 
             PlayerPrefs.Save();
+
+            if (SaveLoadHandler.Instance != null)
+            {
+                SaveLoadHandler.Instance.SaveToDisk();
+            }
 
             // Apply settings to OpenRouter character
             ApplySettingsToCharacter();
@@ -390,7 +435,12 @@ public class OpenRouterSettingsUI : MonoBehaviour
     {
         if (apiKeyField != null && apiKeyField.text.Contains("••"))
         {
-            apiKeyField.text = PlayerPrefs.GetString("OpenRouter_API_Key", "");
+            string key = PlayerPrefs.GetString("OpenRouter_API_Key", "");
+            if (SaveLoadHandler.Instance != null)
+            {
+                key = SaveLoadHandler.Instance.data.openRouterApiKey ?? key;
+            }
+            apiKeyField.text = key;
         }
     }
 
@@ -405,6 +455,11 @@ public class OpenRouterSettingsUI : MonoBehaviour
             apiKeyField.text = "••••••••••••••••";
             // Store in PlayerPrefs
             PlayerPrefs.SetString("OpenRouter_API_Key", actualKey);
+            if (SaveLoadHandler.Instance != null)
+            {
+                SaveLoadHandler.Instance.data.openRouterApiKey = actualKey;
+                SaveLoadHandler.Instance.SaveToDisk();
+            }
         }
     }
 }

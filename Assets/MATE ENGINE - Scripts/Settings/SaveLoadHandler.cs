@@ -137,6 +137,15 @@ public class SaveLoadHandler : MonoBehaviour
         public Dictionary<string, bool> modStates = new Dictionary<string, bool>();
         public int graphicsQualityLevel = 1;
         public Dictionary<string, bool> accessoryStates = new Dictionary<string, bool>();
+
+        // OpenRouter settings (mirrors PlayerPrefs keys for unified persistence)
+        public bool openRouterEnabled = true;
+        public string openRouterApiKey = string.Empty;
+        public string openRouterModel = "deepseek/deepseek-chat-v3.1";
+        public float openRouterTemperature = 0.7f;
+        public float openRouterMaxTokens = 1000f;
+        public bool openRouterStreaming = true;
+        public bool openRouterDebug = false;
     }
 
     public static void SyncAllowedAppsToAllAvatars()

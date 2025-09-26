@@ -136,16 +136,39 @@ public class OpenRouterChatBot : ChatBot
     {
         // Log current Inspector values first
         Debug.Log($"[OpenRouterChatBot] Before loading - Inspector useOpenRouter: {useOpenRouter}");
-        
-        // Load from PlayerPrefs and FORCE override Inspector values
-        openRouterApiKey = PlayerPrefs.GetString("OpenRouter_API_Key", "");
-        openRouterModel = PlayerPrefs.GetString("OpenRouter_Model", "deepseek/deepseek-chat-v3.1");
-        
-        // Get the actual PlayerPrefs value (default to enabled if not set)
-        int enabledValue = PlayerPrefs.GetInt("OpenRouter_Enabled", 1);
-        useOpenRouter = enabledValue == 1;
-        
-        Debug.Log($"[OpenRouterChatBot] PlayerPrefs 'OpenRouter_Enabled' raw value: {enabledValue}");
+
+        bool loadedFromFile = false;
+        var saveData = SaveLoadHandler.Instance?.data;
+        if (saveData != null)
+        {
+            useOpenRouter = saveData.openRouterEnabled;
+            openRouterApiKey = saveData.openRouterApiKey ?? string.Empty;
+            string modelFromFile = string.IsNullOrWhiteSpace(saveData.openRouterModel) ? null : saveData.openRouterModel;
+            openRouterModel = modelFromFile ?? openRouterModel;
+
+            // Keep legacy PlayerPrefs in sync for other components that still rely on them
+            PlayerPrefs.SetString("OpenRouter_API_Key", openRouterApiKey);
+            PlayerPrefs.SetString("OpenRouter_Model", openRouterModel);
+            PlayerPrefs.SetInt("OpenRouter_Enabled", useOpenRouter ? 1 : 0);
+            PlayerPrefs.SetFloat("OpenRouter_Temperature", saveData.openRouterTemperature);
+            PlayerPrefs.SetFloat("OpenRouter_MaxTokens", saveData.openRouterMaxTokens);
+            PlayerPrefs.SetInt("OpenRouter_Streaming", saveData.openRouterStreaming ? 1 : 0);
+            PlayerPrefs.SetInt("OpenRouter_Debug", saveData.openRouterDebug ? 1 : 0);
+            PlayerPrefs.Save();
+
+            loadedFromFile = true;
+        }
+
+        if (!loadedFromFile)
+        {
+            // Load from PlayerPrefs, defaulting to legacy values if file isn't available
+            openRouterApiKey = PlayerPrefs.GetString("OpenRouter_API_Key", "");
+            openRouterModel = PlayerPrefs.GetString("OpenRouter_Model", "deepseek/deepseek-chat-v3.1");
+            int enabledValue = PlayerPrefs.GetInt("OpenRouter_Enabled", 1);
+            useOpenRouter = enabledValue == 1;
+            Debug.Log($"[OpenRouterChatBot] Loaded OpenRouter settings from PlayerPrefs");
+        }
+
         Debug.Log($"[OpenRouterChatBot] Settings loaded - UseOpenRouter: {useOpenRouter}, Model: {openRouterModel}, ApiKey: {(string.IsNullOrEmpty(openRouterApiKey) ? "EMPTY" : "SET")}");
     }
 
@@ -155,6 +178,15 @@ public class OpenRouterChatBot : ChatBot
         PlayerPrefs.SetString("OpenRouter_Model", openRouterModel);
         PlayerPrefs.SetInt("OpenRouter_Enabled", useOpenRouter ? 1 : 0);
         PlayerPrefs.Save();
+
+        if (SaveLoadHandler.Instance != null)
+        {
+            var data = SaveLoadHandler.Instance.data;
+            data.openRouterEnabled = useOpenRouter;
+            data.openRouterApiKey = openRouterApiKey;
+            data.openRouterModel = openRouterModel;
+            SaveLoadHandler.Instance.SaveToDisk();
+        }
     }
 
     private void UpdateStatusText()
@@ -363,7 +395,7 @@ public class OpenRouterChatBot : ChatBot
     }
 
     // Clear chat history for both providers
-    public new void ClearChatHistory()
+    public void ClearChatHistory()
     {
         if (useOpenRouter && openRouterCharacter != null)
         {

@@ -168,6 +168,33 @@ Want to contribute? Setup is easy:
 
 > ⚠️ Avoid scenes like *Mate Engine InDev* unless you're on the dev branch.
 
+### OpenRouter configuration via environment variables
+
+Player builds often ship without user-writable `PlayerPrefs`, so OpenRouter now bootstraps itself from environment variables before the first scene loads. To preconfigure a build, set the following variables for the launched process:
+
+- `OPENROUTER_API_KEY` – Your OpenRouter secret (will never be logged)
+- `OPENROUTER_MODEL` – Model identifier such as `deepseek/deepseek-chat-v3.1`
+- `OPENROUTER_ENABLED` – `true`/`false` (defaults to `true`)
+- Optional fine-tuning: `OPENROUTER_TEMPERATURE`, `OPENROUTER_MAX_TOKENS`, `OPENROUTER_STREAMING`, `OPENROUTER_DEBUG`
+
+On Windows PowerShell you can start the app with injected values like this:
+
+```powershell
+$Env:OPENROUTER_API_KEY = "sk-or-...";
+$Env:OPENROUTER_MODEL = "openai/gpt-5-mini";
+Start-Process ".\MateEngineX.exe"
+```
+
+When the process starts, the bootstrapper writes the values into `PlayerPrefs`, so every component (`OpenRouterChatBot`, `OpenRouterClient`, settings UI, etc.) receives the injected configuration automatically both in the Editor and in builds.
+
+If you prefer file-based configuration, all OpenRouter options are now mirrored into the main `settings.json` that lives under:
+
+```
+%USERPROFILE%\AppData\LocalLow\Shinymoon\MateEngineX\settings.json
+```
+
+Editing the OpenRouter section of that JSON (or using the in-game settings UI) will immediately update the running session and persist for future launches. This path works for both editor play mode and player builds, so you can ship a preconfigured `settings.json` alongside your distribution instead of injecting environment variables.
+
 ---
 
 ## Antivirus Notice
