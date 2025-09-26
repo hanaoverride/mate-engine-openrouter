@@ -5,6 +5,7 @@ using System.Collections.Generic;
 public class OpenRouterSettingsUI : MonoBehaviour
 {
     [Header("UI References")]
+    public Toggle enableOpenRouterToggle;
     public InputField apiKeyField;
     public Dropdown modelDropdown;
     public Slider temperatureSlider;
@@ -52,6 +53,7 @@ public class OpenRouterSettingsUI : MonoBehaviour
     };
 
     private OpenRouterCharacter openRouterCharacter;
+    private OpenRouterChatBot openRouterChatBot;
 
     void Start()
     {
@@ -64,6 +66,9 @@ public class OpenRouterSettingsUI : MonoBehaviour
     {
         // Find OpenRouter character in scene
         openRouterCharacter = FindFirstObjectByType<OpenRouterCharacter>();
+        
+        // Find OpenRouter chat bot in scene
+        openRouterChatBot = FindFirstObjectByType<OpenRouterChatBot>();
         
         // Populate model dropdown
         PopulateModelDropdown();
@@ -107,6 +112,15 @@ public class OpenRouterSettingsUI : MonoBehaviour
 
     private void LoadSettings()
     {
+        // Load OpenRouter Enable Toggle
+        if (enableOpenRouterToggle != null)
+        {
+            // Default to enabled (1) if no setting exists yet
+            bool enabled = PlayerPrefs.GetInt("OpenRouter_Enabled", 1) == 1;
+            enableOpenRouterToggle.isOn = enabled;
+            Debug.Log($"[OpenRouterSettingsUI] Loaded OpenRouter_Enabled: {enabled} (raw value: {PlayerPrefs.GetInt("OpenRouter_Enabled", -999)})");
+        }
+
         // Load API Key
         if (apiKeyField != null)
         {
@@ -118,7 +132,7 @@ public class OpenRouterSettingsUI : MonoBehaviour
         // Load Model Selection
         if (modelDropdown != null)
         {
-            string savedModel = PlayerPrefs.GetString("OpenRouter_Model", "anthropic/claude-3.5-sonnet");
+            string savedModel = PlayerPrefs.GetString("OpenRouter_Model", "deepseek/deepseek-chat-v3.1");
             int modelIndex = 0;
             var modelKeys = new List<string>(availableModels.Keys);
             for (int i = 0; i < modelKeys.Count; i++)
@@ -194,6 +208,12 @@ public class OpenRouterSettingsUI : MonoBehaviour
     {
         try
         {
+            // Save OpenRouter Enable Toggle
+            if (enableOpenRouterToggle != null)
+            {
+                PlayerPrefs.SetInt("OpenRouter_Enabled", enableOpenRouterToggle.isOn ? 1 : 0);
+            }
+
             // Save API Key (only if it's not the masked version)
             if (apiKeyField != null && !apiKeyField.text.Contains("••"))
             {
@@ -258,9 +278,30 @@ public class OpenRouterSettingsUI : MonoBehaviour
 
     private void ApplySettingsToCharacter()
     {
+        // Apply to OpenRouterChatBot first
+        if (openRouterChatBot != null)
+        {
+            if (enableOpenRouterToggle != null)
+            {
+                openRouterChatBot.SetOpenRouterEnabled(enableOpenRouterToggle.isOn);
+            }
+            
+            if (apiKeyField != null && !apiKeyField.text.Contains("••"))
+            {
+                openRouterChatBot.SetOpenRouterApiKey(apiKeyField.text);
+            }
+            
+            var modelKeys = new List<string>(availableModels.Keys);
+            if (modelDropdown != null && modelDropdown.value < modelKeys.Count)
+            {
+                openRouterChatBot.SetOpenRouterModel(modelKeys[modelDropdown.value]);
+            }
+        }
+
+        // Apply to OpenRouterCharacter
         if (openRouterCharacter == null) return;
 
-        var modelKeys = new List<string>(availableModels.Keys);
+        var modelKeys2 = new List<string>(availableModels.Keys);
         
         // Update settings
         if (apiKeyField != null && !apiKeyField.text.Contains("••"))
@@ -268,9 +309,9 @@ public class OpenRouterSettingsUI : MonoBehaviour
             openRouterCharacter.settings.apiKey = apiKeyField.text;
         }
         
-        if (modelDropdown != null && modelDropdown.value < modelKeys.Count)
+        if (modelDropdown != null && modelDropdown.value < modelKeys2.Count)
         {
-            openRouterCharacter.settings.model = modelKeys[modelDropdown.value];
+            openRouterCharacter.settings.model = modelKeys2[modelDropdown.value];
         }
         
         if (temperatureSlider != null)

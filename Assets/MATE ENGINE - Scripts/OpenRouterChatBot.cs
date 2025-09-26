@@ -11,7 +11,7 @@ using System.Collections;
 public class OpenRouterChatBot : ChatBot
 {
     [Header("OpenRouter Integration")]
-    public bool useOpenRouter = false;
+    public bool useOpenRouter = true;  // Default to true for easier testing
     public string openRouterApiKey = "";
     public string openRouterModel = "deepseek/deepseek-chat-v3.1";
     
@@ -23,14 +23,86 @@ public class OpenRouterChatBot : ChatBot
 
     protected override void Start()
     {
+        // Load settings first and override Inspector values
+        LoadOpenRouterSettings();
+        
+        Debug.Log($"[OpenRouterChatBot] After loading settings: useOpenRouter = {useOpenRouter}");
+        
         // Initialize OpenRouter if enabled
         if (useOpenRouter)
         {
             InitializeOpenRouter();
         }
         
-        // Call original Start method
-        base.Start();
+        // Initialize UI components (from original ChatBot.Start)
+        if (font == null) font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        
+        playerUI = new BubbleUI
+        {
+            sprite = sprite,
+            font = font,
+            fontSize = fontSize,
+            fontColor = playerFontColor,
+            bubbleColor = playerColor,
+            bottomPosition = 0,
+            leftPosition = 0,
+            textPadding = textPadding,
+            bubbleOffset = bubbleSpacing,
+            bubbleWidth = bubbleWidth,
+            bubbleHeight = -1
+        };
+
+        aiUI = new BubbleUI
+        {
+            sprite = sprite,
+            font = font,
+            fontSize = fontSize,
+            fontColor = aiFontColor,
+            bubbleColor = aiColor,
+            bottomPosition = 0,
+            leftPosition = 1,
+            textPadding = textPadding,
+            bubbleOffset = bubbleSpacing,
+            bubbleWidth = bubbleWidth,
+            bubbleHeight = -1
+        };
+
+        inputBubble = new InputBubble(chatContainer, playerUI, "InputBubble", "Loading...", 4);
+        inputBubble.AddSubmitListener(onInputFieldSubmit);
+        inputBubble.AddValueChangedListener(onValueChanged);
+        inputBubble.setInteractable(false);
+
+        // Choose rounded sprite based on radius
+        if (cornerRadius <= 16)
+            sprite = roundedSprite16;
+        else if (cornerRadius <= 32)
+            sprite = roundedSprite32;
+        else
+            sprite = roundedSprite64;
+
+        playerUI.sprite = sprite;
+        aiUI.sprite = sprite;
+
+        // Conditional initialization based on provider
+        if (useOpenRouter && isOpenRouterInitialized)
+        {
+            // Skip LLM warmup, go directly to ready state
+            WarmUpCallback();
+        }
+        else
+        {
+            // Use original LLM warmup
+            ShowLoadedMessages();
+            if (llmCharacter != null)
+            {
+                _ = llmCharacter.Warmup(WarmUpCallback);
+            }
+            else
+            {
+                Debug.LogWarning("[OpenRouterChatBot] LLMCharacter not assigned, going to ready state");
+                WarmUpCallback();
+            }
+        }
         
         UpdateStatusText();
     }
@@ -49,8 +121,12 @@ public class OpenRouterChatBot : ChatBot
         // Configure OpenRouterCharacter to use the same chat container
         openRouterCharacter.chatContainer = chatContainer;
         
-        // Load settings
-        LoadOpenRouterSettings();
+        // Apply loaded settings
+        if (openRouterCharacter != null)
+        {
+            openRouterCharacter.SetApiKey(openRouterApiKey);
+            openRouterCharacter.SetModel(openRouterModel);
+        }
         
         isOpenRouterInitialized = true;
         Debug.Log("[OpenRouterChatBot] OpenRouter initialized successfully");
@@ -58,24 +134,24 @@ public class OpenRouterChatBot : ChatBot
 
     private void LoadOpenRouterSettings()
     {
-        // Load from PlayerPrefs
-        openRouterApiKey = PlayerPrefs.GetString("OpenRouter_ApiKey", "");
-        openRouterModel = PlayerPrefs.GetString("OpenRouter_Model", "openai/gpt-3.5-turbo");
-        useOpenRouter = PlayerPrefs.GetInt("OpenRouter_Enabled", 0) == 1;
+        // Log current Inspector values first
+        Debug.Log($"[OpenRouterChatBot] Before loading - Inspector useOpenRouter: {useOpenRouter}");
         
-        // Apply to OpenRouterCharacter
-        if (openRouterCharacter != null)
-        {
-            openRouterCharacter.SetApiKey(openRouterApiKey);
-            openRouterCharacter.SetModel(openRouterModel);
-        }
+        // Load from PlayerPrefs and FORCE override Inspector values
+        openRouterApiKey = PlayerPrefs.GetString("OpenRouter_API_Key", "");
+        openRouterModel = PlayerPrefs.GetString("OpenRouter_Model", "deepseek/deepseek-chat-v3.1");
         
-        Debug.Log($"[OpenRouterChatBot] Settings loaded - UseOpenRouter: {useOpenRouter}, Model: {openRouterModel}");
+        // Get the actual PlayerPrefs value (default to enabled if not set)
+        int enabledValue = PlayerPrefs.GetInt("OpenRouter_Enabled", 1);
+        useOpenRouter = enabledValue == 1;
+        
+        Debug.Log($"[OpenRouterChatBot] PlayerPrefs 'OpenRouter_Enabled' raw value: {enabledValue}");
+        Debug.Log($"[OpenRouterChatBot] Settings loaded - UseOpenRouter: {useOpenRouter}, Model: {openRouterModel}, ApiKey: {(string.IsNullOrEmpty(openRouterApiKey) ? "EMPTY" : "SET")}");
     }
 
     private void SaveOpenRouterSettings()
     {
-        PlayerPrefs.SetString("OpenRouter_ApiKey", openRouterApiKey);
+        PlayerPrefs.SetString("OpenRouter_API_Key", openRouterApiKey);
         PlayerPrefs.SetString("OpenRouter_Model", openRouterModel);
         PlayerPrefs.SetInt("OpenRouter_Enabled", useOpenRouter ? 1 : 0);
         PlayerPrefs.Save();
@@ -249,6 +325,21 @@ public class OpenRouterChatBot : ChatBot
         AddBubble($"Switched to OpenRouter ({openRouterModel})", false);
     }
 
+    // Public method to enable/disable OpenRouter (called from UI)
+    public void SetOpenRouterEnabled(bool enabled)
+    {
+        useOpenRouter = enabled;
+        SaveOpenRouterSettings();
+        UpdateStatusText();
+        
+        if (enabled && !isOpenRouterInitialized)
+        {
+            InitializeOpenRouter();
+        }
+        
+        Debug.Log($"[OpenRouterChatBot] OpenRouter {(enabled ? "enabled" : "disabled")}");
+    }
+
     public void SetOpenRouterApiKey(string apiKey)
     {
         openRouterApiKey = apiKey;
@@ -294,5 +385,23 @@ public class OpenRouterChatBot : ChatBot
         useOpenRouter = !useOpenRouter;
         UpdateStatusText();
         Debug.Log($"[OpenRouterChatBot] Provider switched to: {(useOpenRouter ? "OpenRouter" : "ZomeAI")}");
+    }
+
+    [ContextMenu("Reset PlayerPrefs")]
+    public void ResetPlayerPrefs()
+    {
+        PlayerPrefs.DeleteKey("OpenRouter_API_Key");
+        PlayerPrefs.DeleteKey("OpenRouter_Model");
+        PlayerPrefs.DeleteKey("OpenRouter_Enabled");
+        PlayerPrefs.Save();
+        Debug.Log("[OpenRouterChatBot] PlayerPrefs reset! Reload the scene to apply default values.");
+    }
+
+    [ContextMenu("Log Current Settings")]
+    public void LogCurrentSettings()
+    {
+        Debug.Log($"[OpenRouterChatBot] Current useOpenRouter: {useOpenRouter}");
+        Debug.Log($"[OpenRouterChatBot] PlayerPrefs 'OpenRouter_Enabled': {PlayerPrefs.GetInt("OpenRouter_Enabled", -999)}");
+        Debug.Log($"[OpenRouterChatBot] PlayerPrefs 'OpenRouter_API_Key': {PlayerPrefs.GetString("OpenRouter_API_Key", "NOT_SET")}");
     }
 }

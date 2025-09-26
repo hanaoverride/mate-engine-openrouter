@@ -144,7 +144,7 @@ namespace LLMUnitySamples
             return bubble;
         }
 
-        void ShowLoadedMessages()
+        protected void ShowLoadedMessages()
         {
             for (int i=1; i<llmCharacter.chat.Count; i++) AddBubble(llmCharacter.chat[i].content, i%2==1);
         }
@@ -223,7 +223,7 @@ namespace LLMUnitySamples
             inputBubble.MoveTextEnd();
         }
 
-        void onValueChanged(string newText)
+        protected virtual void onValueChanged(string newText)
         {
             // Get rid of newline character added when we press enter
             if (Input.GetKey(KeyCode.Return))
