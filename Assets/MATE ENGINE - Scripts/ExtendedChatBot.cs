@@ -63,9 +63,32 @@ public class ExtendedChatBot : MonoBehaviour
 
     void Start()
     {
+        Debug.Log("[ExtendedChatBot] Starting initialization...");
         InitializeProviders();
         SetupUI();
         StartWarmup();
+    }
+
+    void Update()
+    {
+        // Critical: Keep input focused (from original ChatBot)
+        if (!inputBubble.inputFocused() && warmUpDone)
+        {
+            inputBubble.ActivateInputField();
+            StartCoroutine(BlockInteraction());
+        }
+
+        // Handle lastBubbleOutsideFOV logic (optional for UI cleanup)
+        if (lastBubbleOutsideFOV != -1)
+        {
+            // destroy bubbles outside the container
+            for (int i = 0; i <= lastBubbleOutsideFOV; i++)
+            {
+                chatBubbles[i].Destroy();
+            }
+            chatBubbles.RemoveRange(0, lastBubbleOutsideFOV + 1);
+            lastBubbleOutsideFOV = -1;
+        }
     }
 
     private void InitializeProviders()
@@ -91,6 +114,15 @@ public class ExtendedChatBot : MonoBehaviour
 
     private void SetupUI()
     {
+        Debug.Log("[ExtendedChatBot] Setting up UI...");
+        
+        // Validate chat container first
+        if (chatContainer == null)
+        {
+            Debug.LogError("[ExtendedChatBot] Chat Container is null! Please assign it in Inspector.");
+            return;
+        }
+
         // Setup bubble UI
         playerUI = new BubbleUI
         {
@@ -132,13 +164,13 @@ public class ExtendedChatBot : MonoBehaviour
         aiUI.sprite = sprite;
 
         // Create input bubble
-        if (chatContainer != null)
-        {
-            inputBubble = new InputBubble(chatContainer, playerUI, "InputBubble", "Loading...", 4);
-            inputBubble.AddSubmitListener(OnInputFieldSubmit);
-            inputBubble.AddValueChangedListener(OnValueChanged);
-            inputBubble.setInteractable(false);
-        }
+        Debug.Log("[ExtendedChatBot] Creating InputBubble...");
+        inputBubble = new InputBubble(chatContainer, playerUI, "InputBubble", "Loading...", 4);
+        inputBubble.AddSubmitListener(OnInputFieldSubmit);
+        inputBubble.AddValueChangedListener(OnValueChanged);
+        inputBubble.setInteractable(false);
+        
+        Debug.Log("[ExtendedChatBot] InputBubble created successfully");
     }
 
     private async void StartWarmup()
@@ -165,17 +197,43 @@ public class ExtendedChatBot : MonoBehaviour
 
     public void WarmUpCallback()
     {
+        Debug.Log($"[ExtendedChatBot] WarmUpCallback called for {provider}");
         warmUpDone = true;
+        
         if (inputBubble != null)
         {
             inputBubble.SetPlaceHolderText(inputPlaceholder);
             AllowInput();
+            
+            Debug.Log("[ExtendedChatBot] Input enabled and placeholder set");
         }
+        else
+        {
+            Debug.LogError("[ExtendedChatBot] InputBubble is null in WarmUpCallback!");
+        }
+        
         Debug.Log($"[ExtendedChatBot] {provider} warmed up and ready");
+    }
+
+    // Public method for testing - can be called from Unity Inspector
+    [ContextMenu("Test Input Text")]
+    public void TestInputText()
+    {
+        if (inputBubble != null)
+        {
+            inputBubble.SetText("Test input working!");
+            inputBubble.ActivateInputField();
+            Debug.Log("[ExtendedChatBot] Test text set in InputBubble");
+        }
+        else
+        {
+            Debug.LogError("[ExtendedChatBot] InputBubble is null for test!");
+        }
     }
 
     private async void OnInputFieldSubmit(string newText)
     {
+        Debug.Log($"[ExtendedChatBot] Input submitted: '{newText}'");
         inputBubble.ActivateInputField();
         
         if (blockInput || newText.Trim() == "" || Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
@@ -293,7 +351,7 @@ public class ExtendedChatBot : MonoBehaviour
 
     private void OnValueChanged(string newText)
     {
-        // Handle enter key behavior
+        // Get rid of newline character added when we press enter (from original ChatBot)
         if (Input.GetKey(KeyCode.Return))
         {
             if (inputBubble.GetText().Trim() == "")
@@ -325,8 +383,17 @@ public class ExtendedChatBot : MonoBehaviour
 
     public void AllowInput()
     {
+        Debug.Log("[ExtendedChatBot] AllowInput called");
         blockInput = false;
-        inputBubble?.ReActivateInputField();
+        if (inputBubble != null)
+        {
+            inputBubble.ReActivateInputField();
+            Debug.Log("[ExtendedChatBot] InputBubble reactivated");
+        }
+        else
+        {
+            Debug.LogError("[ExtendedChatBot] InputBubble is null in AllowInput!");
+        }
     }
 
     public void CancelRequests()
