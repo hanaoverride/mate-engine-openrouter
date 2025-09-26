@@ -45,96 +45,106 @@ public class OpenRouterCharacter : MonoBehaviour
     [Header("UI References")]
     public Transform chatContainer;
     
+    // UI feedback components
+    [Header("Error Display")]
+    public UnityEngine.UI.Text statusText; // For showing connection status
+    public bool showErrorsInChat = true; // Show errors as chat messages
+    
     private OpenRouterClient client;
     private List<OpenRouterMessage> chatHistory = new List<OpenRouterMessage>();
     private System.Threading.SemaphoreSlim chatLock = new System.Threading.SemaphoreSlim(1, 1);
     private bool isProcessing = false;
 
-    void Awake()
+    void Start()
     {
-        // Initialize OpenRouter client
+        // Get or create OpenRouterClient
         client = gameObject.GetComponent<OpenRouterClient>();
         if (client == null)
         {
             client = gameObject.AddComponent<OpenRouterClient>();
         }
         
-        // Setup client from settings
-        UpdateClientSettings();
+        // Load system prompt and chat history
+        LoadSystemPrompt();
+        LoadHistory();
         
-        // Initialize chat history
-        InitializeHistory();
-    }
-
-    void Start()
-    {
-        // Load system prompt from file (similar to LLMCharacter)
-        LoadSystemPromptFromFile();
-        
-        // Apply system prompt to history
+        // Initialize with system prompt
         if (!string.IsNullOrEmpty(systemPrompt))
         {
-            chatHistory.Insert(0, new OpenRouterMessage 
-            { 
-                role = "system", 
-                content = systemPrompt 
-            });
-        }
-    }
-
-    private void UpdateClientSettings()
-    {
-        if (client != null)
-        {
-            client.temperature = settings.temperature;
-            client.maxTokens = settings.maxTokens;
-            client.topP = settings.topP;
-            client.frequencyPenalty = settings.frequencyPenalty;
-            client.presencePenalty = settings.presencePenalty;
-            client.enableStreaming = settings.enableStreaming;
-            client.debugRequests = settings.debugRequests;
-            
-            if (!string.IsNullOrEmpty(settings.apiKey))
+            // Check if system message already exists
+            if (chatHistory.Count == 0 || chatHistory[0].role != "system")
             {
-                client.SetApiKey(settings.apiKey);
+                chatHistory.Insert(0, new OpenRouterMessage
+                {
+                    role = "system",
+                    content = systemPrompt
+                });
             }
         }
     }
 
-    private void LoadSystemPromptFromFile()
+    public void AddMessage(string role, string content)
     {
-        string promptPath = Path.Combine(Application.persistentDataPath, "OpenRouter_prompt.txt");
+        var message = new OpenRouterMessage
+        {
+            role = role == playerName ? "user" : "assistant",
+            content = content
+        };
         
-        if (File.Exists(promptPath))
+        chatHistory.Add(message);
+        
+        // Limit history size to prevent token overflow
+        if (chatHistory.Count > 50)
         {
-            string loadedPrompt = File.ReadAllText(promptPath);
-            if (!string.IsNullOrEmpty(loadedPrompt))
-            {
-                systemPrompt = loadedPrompt;
-                Debug.Log("[OpenRouterCharacter] System prompt loaded from file");
-            }
-        }
-        else
-        {
-            // Create the file with default prompt
-            File.WriteAllText(promptPath, systemPrompt);
-            Debug.Log("[OpenRouterCharacter] Created new system prompt file");
+            // Keep system message and remove oldest user/assistant messages
+            var systemMessages = chatHistory.Where(m => m.role == "system").ToList();
+            var otherMessages = chatHistory.Where(m => m.role != "system").Skip(10).ToList();
+            
+            chatHistory = new List<OpenRouterMessage>();
+            chatHistory.AddRange(systemMessages);
+            chatHistory.AddRange(otherMessages);
         }
     }
 
-    private void InitializeHistory()
+    private void LoadSystemPrompt()
+    {
+        try
+        {
+            string promptPath = Path.Combine(Application.persistentDataPath, "OpenRouter_prompt.txt");
+            if (File.Exists(promptPath))
+            {
+                string savedPrompt = File.ReadAllText(promptPath);
+                if (!string.IsNullOrEmpty(savedPrompt))
+                {
+                    systemPrompt = savedPrompt;
+                    Debug.Log("[OpenRouterCharacter] System prompt loaded from file");
+                }
+            }
+            else
+            {
+                // Create default prompt file
+                File.WriteAllText(promptPath, systemPrompt);
+                Debug.Log("[OpenRouterCharacter] Created new system prompt file");
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"[OpenRouterCharacter] Failed to load system prompt: {e.Message}");
+        }
+    }
+
+    private void LoadHistory()
     {
         if (!saveHistory) return;
         
-        string historyPath = Path.Combine(Application.persistentDataPath, $"{saveFileName}.json");
-        
         try
         {
+            string historyPath = Path.Combine(Application.persistentDataPath, $"{saveFileName}.json");
             if (File.Exists(historyPath))
             {
                 string json = File.ReadAllText(historyPath);
                 var wrapper = JsonUtility.FromJson<ChatHistoryWrapper>(json);
-                if (wrapper != null && wrapper.messages != null)
+                if (wrapper?.messages != null)
                 {
                     chatHistory = wrapper.messages;
                     Debug.Log($"[OpenRouterCharacter] Loaded {chatHistory.Count} messages from history");
@@ -174,14 +184,20 @@ public class OpenRouterCharacter : MonoBehaviour
     {
         if (isProcessing)
         {
-            Debug.LogWarning("[OpenRouterCharacter] Already processing a request. Please wait...");
-            return "Please wait for the current request to complete.";
+            string waitMessage = "Please wait for the current request to complete.";
+            ShowUserWarning(waitMessage);
+            return waitMessage;
         }
 
         if (string.IsNullOrEmpty(userMessage.Trim()))
         {
-            return "Please enter a message.";
+            string emptyMessage = "Please enter a message.";
+            ShowUserWarning(emptyMessage);
+            return emptyMessage;
         }
+
+        // Show processing status
+        ShowUserInfo("Sending message...");
 
         await chatLock.WaitAsync();
         isProcessing = true;
@@ -192,7 +208,7 @@ public class OpenRouterCharacter : MonoBehaviour
             // Add user message to history
             AddMessage(playerName, userMessage);
             
-            // Prepare messages for API (excluding system message for token efficiency)
+            // Prepare messages for API
             var apiMessages = PrepareMessagesForAPI();
             
             // Update client settings before request
@@ -204,27 +220,43 @@ public class OpenRouterCharacter : MonoBehaviour
             // Check if response indicates an error
             if (!string.IsNullOrEmpty(response))
             {
-                if (response.StartsWith("Error:") || response.StartsWith("Rate limited"))
+                if (response.StartsWith("Error:"))
                 {
-                    // Don't add error messages to chat history
                     // Remove the user message we just added since the request failed
                     if (chatHistory.Count > 0 && chatHistory[chatHistory.Count - 1].content == userMessage)
                     {
                         chatHistory.RemoveAt(chatHistory.Count - 1);
                     }
                     
-                    Debug.LogWarning($"[OpenRouterCharacter] Request failed: {response}");
+                    // Show error to user
+                    ShowUserError(response.Substring(6).Trim()); // Remove "Error:" prefix for display
+                    return response;
+                }
+                else if (response.StartsWith("Rate limited"))
+                {
+                    // Remove the user message we just added since the request failed
+                    if (chatHistory.Count > 0 && chatHistory[chatHistory.Count - 1].content == userMessage)
+                    {
+                        chatHistory.RemoveAt(chatHistory.Count - 1);
+                    }
+                    
+                    // Show rate limit warning to user
+                    ShowUserWarning("Rate limited. Please wait a moment before sending another message.");
                     return response;
                 }
                 else
                 {
-                    // Add AI response to history
+                    // Successful response
                     AddMessage(aiName, response);
-                    
-                    // Save history after successful response
                     SaveHistory();
                     
-                    Debug.Log($"[OpenRouterCharacter] Response received: {response.Substring(0, Math.Min(50, response.Length))}...");
+                    // Update UI with the response
+                    onPartialResponse?.Invoke(response);
+                    
+                    // Show success status
+                    ShowUserInfo("Message received");
+                    
+                    Debug.Log($"[OpenRouterCharacter] Response received: {response.Substring(0, System.Math.Min(50, response.Length))}...");
                 }
             }
             else
@@ -232,11 +264,17 @@ public class OpenRouterCharacter : MonoBehaviour
                 // Empty response - treat as error
                 response = "No response received from the AI. Please try again.";
                 
+                // Update UI with error message
+                onPartialResponse?.Invoke(response);
+                
                 // Remove the user message since request failed
                 if (chatHistory.Count > 0 && chatHistory[chatHistory.Count - 1].content == userMessage)
                 {
                     chatHistory.RemoveAt(chatHistory.Count - 1);
                 }
+                
+                // Show error to user
+                ShowUserError("No response from AI server. Please check your connection and try again.");
             }
         }
         catch (System.Exception e)
@@ -248,7 +286,14 @@ public class OpenRouterCharacter : MonoBehaviour
             }
             
             response = $"An error occurred: {e.Message}";
-            Debug.LogError($"[OpenRouterCharacter] Chat request failed: {e.Message}\n{e.StackTrace}");
+            
+            // Update UI with error message
+            onPartialResponse?.Invoke(response);
+            
+            // Show user-friendly error
+            ShowUserError("Connection failed. Please check your internet connection and API settings.");
+            
+            Debug.LogError($"[OpenRouterCharacter] Chat request failed: {e.Message}");
         }
         finally
         {
@@ -261,72 +306,43 @@ public class OpenRouterCharacter : MonoBehaviour
 
         return response;
     }
-            
-            // Send request to OpenRouter
-            if (settings.enableStreaming && onPartialResponse != null)
-            {
-                response = await client.SendChatRequest(apiMessages, settings.model, onPartialResponse);
-            }
-            else
-            {
-                response = await client.SendChatRequest(apiMessages, settings.model);
-            }
-
-            if (!string.IsNullOrEmpty(response))
-            {
-                // Add AI response to history
-                AddMessage(aiName, response);
-                
-                // Save history
-                SaveHistory();
-            }
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogError($"[OpenRouterCharacter] Chat error: {e.Message}");
-        }
-        finally
-        {
-            isProcessing = false;
-            chatLock.Release();
-            onComplete?.Invoke();
-        }
-
-        return response;
-    }
 
     private List<OpenRouterMessage> PrepareMessagesForAPI()
     {
         var messages = new List<OpenRouterMessage>();
         
-        // Always include system message first
-        if (chatHistory.Count > 0 && chatHistory[0].role == "system")
+        // Add system message if present
+        var systemMessage = chatHistory.FirstOrDefault(m => m.role == "system");
+        if (systemMessage != null)
         {
-            messages.Add(chatHistory[0]);
+            messages.Add(systemMessage);
         }
-        else if (!string.IsNullOrEmpty(systemPrompt))
-        {
-            messages.Add(new OpenRouterMessage { role = "system", content = systemPrompt });
-        }
-
-        // Add recent conversation history (limit to prevent token overflow)
+        
+        // Add recent conversation history (excluding system messages)
         var recentMessages = chatHistory.Where(m => m.role != "system").TakeLast(20).ToList();
         messages.AddRange(recentMessages);
-
+        
         return messages;
     }
 
-    public void AddMessage(string role, string content)
+    private void UpdateClientSettings()
     {
-        if (string.IsNullOrEmpty(content)) return;
-        
-        var message = new OpenRouterMessage
+        if (client != null)
         {
-            role = role.ToLower() == playerName.ToLower() ? "user" : "assistant",
-            content = content
-        };
-        
-        chatHistory.Add(message);
+            client.temperature = settings.temperature;
+            client.maxTokens = settings.maxTokens;
+            client.topP = settings.topP;
+            client.frequencyPenalty = settings.frequencyPenalty;
+            client.presencePenalty = settings.presencePenalty;
+            client.enableStreaming = settings.enableStreaming;
+            client.debugRequests = settings.debugRequests;
+            
+            // Set API key if provided
+            if (!string.IsNullOrEmpty(settings.apiKey))
+            {
+                client.SetApiKey(settings.apiKey);
+            }
+        }
     }
 
     public void ClearHistory()
@@ -336,10 +352,10 @@ public class OpenRouterCharacter : MonoBehaviour
         // Re-add system prompt
         if (!string.IsNullOrEmpty(systemPrompt))
         {
-            chatHistory.Add(new OpenRouterMessage 
-            { 
-                role = "system", 
-                content = systemPrompt 
+            chatHistory.Add(new OpenRouterMessage
+            {
+                role = "system",
+                content = systemPrompt
             });
         }
         
@@ -353,7 +369,15 @@ public class OpenRouterCharacter : MonoBehaviour
         {
             client.CancelAllRequests();
         }
+        
         isProcessing = false;
+        chatLock.Release();
+        Debug.Log("[OpenRouterCharacter] All requests cancelled");
+    }
+
+    public int GetHistoryCount()
+    {
+        return chatHistory.Count;
     }
 
     public bool IsProcessing()
@@ -361,9 +385,134 @@ public class OpenRouterCharacter : MonoBehaviour
         return isProcessing;
     }
 
-    public int GetHistoryCount()
+    // UI Feedback Methods
+    private void ShowUserError(string errorMessage)
     {
-        return chatHistory.Count;
+        // Update status text if available
+        UpdateStatusText($"Error: {errorMessage}");
+        
+        // Show error in chat if enabled
+        if (showErrorsInChat)
+        {
+            ShowErrorInChat(errorMessage);
+        }
+        
+        // Still log for developers
+        Debug.LogError($"[OpenRouterCharacter] User Error: {errorMessage}");
+    }
+
+    private void ShowUserWarning(string warningMessage)
+    {
+        // Update status text if available
+        UpdateStatusText($"Warning: {warningMessage}");
+        
+        // Show warning in chat if enabled
+        if (showErrorsInChat)
+        {
+            ShowWarningInChat(warningMessage);
+        }
+        
+        // Still log for developers
+        Debug.LogWarning($"[OpenRouterCharacter] User Warning: {warningMessage}");
+    }
+
+    private void ShowUserInfo(string infoMessage)
+    {
+        // Update status text if available
+        UpdateStatusText(infoMessage);
+        
+        // Still log for developers
+        Debug.Log($"[OpenRouterCharacter] User Info: {infoMessage}");
+    }
+
+    private void UpdateStatusText(string message)
+    {
+        if (statusText != null)
+        {
+            statusText.text = message;
+            // Clear status after 5 seconds for non-error messages
+            if (!message.StartsWith("Error:"))
+            {
+                StartCoroutine(ClearStatusAfterDelay(5f));
+            }
+        }
+    }
+
+    private System.Collections.IEnumerator ClearStatusAfterDelay(float delay)
+    {
+        yield return new UnityEngine.WaitForSeconds(delay);
+        if (statusText != null && !statusText.text.StartsWith("Error:"))
+        {
+            statusText.text = "Ready";
+        }
+    }
+
+    private void ShowErrorInChat(string errorMessage)
+    {
+        if (chatContainer != null)
+        {
+            try
+            {
+                // Create a system error message that appears in chat
+                var errorBubble = CreateErrorBubble(errorMessage, true); // true for error (red)
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[OpenRouterCharacter] Failed to show error in chat: {e.Message}");
+            }
+        }
+    }
+
+    private void ShowWarningInChat(string warningMessage)
+    {
+        if (chatContainer != null)
+        {
+            try
+            {
+                // Create a system warning message that appears in chat
+                var warningBubble = CreateErrorBubble(warningMessage, false); // false for warning (yellow)
+            }
+            catch (System.Exception e)
+            {
+                Debug.LogError($"[OpenRouterCharacter] Failed to show warning in chat: {e.Message}");
+            }
+        }
+    }
+
+    private GameObject CreateErrorBubble(string message, bool isError)
+    {
+        // This is a simplified version - you might want to use the same Bubble system as the main chat
+        GameObject errorMessage = new GameObject($"ErrorMessage_{System.DateTime.Now.Ticks}");
+        errorMessage.transform.SetParent(chatContainer, false);
+        
+        // Add UI Text component
+        var textComponent = errorMessage.AddComponent<UnityEngine.UI.Text>();
+        textComponent.text = isError ? $"❌ {message}" : $"⚠️ {message}";
+        textComponent.color = isError ? Color.red : new Color(1f, 0.8f, 0f); // Red for error, yellow for warning
+        textComponent.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
+        textComponent.fontSize = 12;
+        textComponent.alignment = TextAnchor.MiddleCenter;
+        
+        // Add RectTransform for positioning
+        var rectTransform = errorMessage.GetComponent<RectTransform>();
+        rectTransform.anchorMin = new Vector2(0, 1);
+        rectTransform.anchorMax = new Vector2(1, 1);
+        rectTransform.offsetMin = new Vector2(10, -30);
+        rectTransform.offsetMax = new Vector2(-10, -10);
+        
+        // Auto-remove error message after 10 seconds
+        StartCoroutine(RemoveErrorMessageAfterDelay(errorMessage, 10f));
+        
+        return errorMessage;
+    }
+
+    private System.Collections.IEnumerator RemoveErrorMessageAfterDelay(GameObject errorMessage, float delay)
+    {
+        yield return new UnityEngine.WaitForSeconds(delay);
+        if (errorMessage != null)
+        {
+            DestroyImmediate(errorMessage);
+        }
     }
 
     // For compatibility with existing UI code
@@ -397,28 +546,39 @@ public class OpenRouterCharacter : MonoBehaviour
         settings.apiKey = newApiKey;
         if (client != null)
         {
-            UpdateClientSettings();
+            client.SetApiKey(newApiKey);
         }
+        
+        // Provide user feedback
+        if (string.IsNullOrEmpty(newApiKey))
+        {
+            ShowUserWarning("API key cleared. OpenRouter will not work without a valid API key.");
+        }
+        else
+        {
+            ShowUserInfo("API key updated successfully");
+        }
+        
         Debug.Log("[OpenRouterCharacter] API key updated");
     }
 
     public void SetModel(string newModel)
     {
+        string oldModel = settings.model;
         settings.model = newModel;
-        if (client != null)
+        
+        // Provide user feedback
+        if (string.IsNullOrEmpty(newModel))
         {
-            UpdateClientSettings();
+            ShowUserWarning("Model name is empty. Using default model.");
+            settings.model = "deepseek/deepseek-chat-v3.1"; // Fallback to default
         }
-        Debug.Log($"[OpenRouterCharacter] Model changed to: {newModel}");
-    }
-
-    void OnValidate()
-    {
-        // Update client settings when inspector values change
-        if (Application.isPlaying && client != null)
+        else
         {
-            UpdateClientSettings();
+            ShowUserInfo($"Model changed to: {newModel}");
         }
+        
+        Debug.Log($"[OpenRouterCharacter] Model changed from {oldModel} to: {settings.model}");
     }
 
     void OnDestroy()

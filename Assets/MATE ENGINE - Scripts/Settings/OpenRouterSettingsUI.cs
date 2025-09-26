@@ -26,30 +26,24 @@ public class OpenRouterSettingsUI : MonoBehaviour
     private readonly Dictionary<string, string> availableModels = new Dictionary<string, string>
     {
         // OpenAI Models
-        {"gpt-4o", "OpenAI GPT-4o"},
-        {"gpt-4o-mini", "OpenAI GPT-4o Mini"},
-        {"gpt-4-turbo", "OpenAI GPT-4 Turbo"},
-        {"gpt-3.5-turbo", "OpenAI GPT-3.5 Turbo"},
+        {"openai/gpt-5", "OpenAI GPT-5"},
+        {"openai/gpt-5-mini", "OpenAI GPT-5 Mini"},
+        {"openai/gpt-5-chat-latest", "OpenAI GPT-5 Chat Latest"},
         
         // Anthropic Models
-        {"anthropic/claude-3.5-sonnet", "Anthropic Claude 3.5 Sonnet"},
-        {"anthropic/claude-3-haiku", "Anthropic Claude 3 Haiku"},
-        {"anthropic/claude-3-opus", "Anthropic Claude 3 Opus"},
+        {"anthropic/claude-4.1-sonnet", "Anthropic Claude 4.1 Sonnet"},
         
         // Google Models
-        {"google/gemini-pro", "Google Gemini Pro"},
-        {"google/gemini-pro-vision", "Google Gemini Pro Vision"},
+        {"google/gemini-2.5-flash", "Google: Gemini 2.5 Flash"},
+        {"google/gemini-2.5-pro", "Google: Gemini 2.5 Pro"},
+        {"google/gemma-3-27b-it", "Google: Gemma 3 27B"},
         
-        // Other Popular Models
-        {"meta-llama/llama-3.2-90b-vision-instruct", "Meta Llama 3.2 90B Vision"},
-        {"meta-llama/llama-3.1-405b-instruct", "Meta Llama 3.1 405B"},
-        {"mistralai/mistral-large", "Mistral Large"},
-        {"mistralai/codestral-mamba", "Codestral Mamba"},
+        // xAI Models
+        {"x-ai/grok-4-fast", "xAI: Grok 4 Fast"},
         
         // Free Models
-        {"microsoft/phi-3-mini-128k-instruct:free", "Phi-3 Mini (Free)"},
-        {"meta-llama/llama-3.1-8b-instruct:free", "Llama 3.1 8B (Free)"},
-        {"google/gemma-2-9b-it:free", "Gemma 2 9B (Free)"}
+        {"deepseek/deepseek-chat-v3.1:free", "DeepSeek: DeepSeek V3.1 (free)"},
+        {"x-ai/grok-4-fast:free", "xAI: Grok 4 Fast (free)"},
     };
 
     private OpenRouterCharacter openRouterCharacter;

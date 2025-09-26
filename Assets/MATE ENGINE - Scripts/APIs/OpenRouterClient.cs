@@ -29,7 +29,14 @@ public class OpenRouterChoice
 {
     public int index;
     public OpenRouterMessage message;
+    public OpenRouterDelta delta; // For streaming responses
     public string finish_reason;
+}
+
+[Serializable]
+public class OpenRouterDelta
+{
+    public string content;
 }
 
 [Serializable]
@@ -95,7 +102,7 @@ public class OpenRouterClient : MonoBehaviour
     [Header("OpenRouter Configuration")]
     [SerializeField] private string apiKey = "";
     [SerializeField] private string baseUrl = "https://openrouter.ai/api/v1";
-    [SerializeField] private string defaultModel = "anthropic/claude-3.5-sonnet";
+    [SerializeField] private string defaultModel = "deepseek/deepseek-chat-v3.1";
     
     [Header("Request Settings")]
     public float temperature = 0.7f;
@@ -103,7 +110,7 @@ public class OpenRouterClient : MonoBehaviour
     public float topP = 1.0f;
     public float frequencyPenalty = 0.0f;
     public float presencePenalty = 0.0f;
-    public bool enableStreaming = true;
+    public bool enableStreaming = false; // Disabled by default due to SSE parsing complexity
     
     [Header("Retry Settings")]
     public int maxRetries = 3;
@@ -148,6 +155,12 @@ public class OpenRouterClient : MonoBehaviour
         {
             Debug.LogError("[OpenRouter] API Key is not set!");
             return "Error: API Key not configured. Please set your OpenRouter API key.";
+        }
+
+        // Validate API key format (OpenRouter keys typically start with "sk-or-")
+        if (!apiKey.StartsWith("sk-or-") && !apiKey.StartsWith("sk-"))
+        {
+            Debug.LogWarning("[OpenRouter] API key format seems unusual. OpenRouter keys usually start with 'sk-or-'");
         }
 
         // Retry logic with exponential backoff
@@ -269,9 +282,32 @@ public class OpenRouterClient : MonoBehaviour
         {
             string responseText = webRequest.downloadHandler.text;
             
-            if (debugRequests)
+            // Always log the raw response for debugging when there are issues
+            if (debugRequests || string.IsNullOrEmpty(responseText) || !responseText.TrimStart().StartsWith("{"))
             {
-                Debug.Log($"[OpenRouter] Response: {responseText}");
+                Debug.Log($"[OpenRouter] Raw Response (Status: {webRequest.responseCode}): {responseText}");
+            }
+
+            // Check if response is Server-Sent Events (streaming format)
+            if (responseText.StartsWith("data:") || responseText.Contains("data: {"))
+            {
+                Debug.LogWarning("[OpenRouter] Received streaming response, but streaming is disabled. Parsing as SSE...");
+                return ParseSSEResponse(responseText);
+            }
+
+            // Check if response is HTML instead of JSON
+            if (responseText.TrimStart().StartsWith("<") || responseText.Contains("<html"))
+            {
+                Debug.LogError($"[OpenRouter] Received HTML response instead of JSON. Status: {webRequest.responseCode}");
+                Debug.LogError($"[OpenRouter] HTML Response: {responseText.Substring(0, System.Math.Min(500, responseText.Length))}...");
+                return "Error: Received HTML response from API. This usually indicates an authentication or server issue.";
+            }
+
+            // Check if response is empty
+            if (string.IsNullOrWhiteSpace(responseText))
+            {
+                Debug.LogError("[OpenRouter] Received empty response from API");
+                return "Error: Empty response from API";
             }
 
             try
@@ -279,18 +315,25 @@ public class OpenRouterClient : MonoBehaviour
                 var response = JsonUtility.FromJson<OpenRouterResponse>(responseText);
                 if (response?.choices != null && response.choices.Count > 0)
                 {
-                    return response.choices[0].message.content;
+                    string content = response.choices[0].message.content;
+                    if (debugRequests)
+                    {
+                        Debug.Log($"[OpenRouter] Parsed content: {content.Substring(0, System.Math.Min(100, content.Length))}...");
+                    }
+                    return content;
                 }
                 else
                 {
-                    Debug.LogError("[OpenRouter] Invalid response format");
-                    return "Error: Invalid response format from API";
+                    Debug.LogError("[OpenRouter] Response missing choices or message content");
+                    Debug.LogError($"[OpenRouter] Response structure: choices={response?.choices?.Count}, model={response?.model}");
+                    return "Error: Invalid response format from API - missing message content";
                 }
             }
             catch (Exception e)
             {
                 Debug.LogError($"[OpenRouter] Failed to parse response: {e.Message}");
-                return $"Error: Failed to parse API response - {e.Message}";
+                Debug.LogError($"[OpenRouter] Response Text: {responseText}");
+                return $"Error: Failed to parse API response - {e.Message}\nResponse: {responseText}";
             }
         }
         else
@@ -299,29 +342,113 @@ public class OpenRouterClient : MonoBehaviour
         }
     }
 
-    private string HandleHttpError(UnityWebRequest webRequest)
+            private string ParseSSEResponse(string sseData)
+        {
+            try
+            {
+                var lines = sseData.Split(new[] { '\n', '\r' }, System.StringSplitOptions.RemoveEmptyEntries);
+                var contentBuilder = new System.Text.StringBuilder();
+                
+                Debug.Log($"[OpenRouter] Parsing SSE response with {lines.Length} lines");
+                
+                foreach (var line in lines)
+                {
+                    if (line.StartsWith("data: "))
+                    {
+                        var jsonData = line.Substring(6); // Remove "data: "
+                        
+                        // Skip if it's the end marker
+                        if (jsonData.Trim() == "[DONE]")
+                        {
+                            Debug.Log("[OpenRouter] Found [DONE] marker, stopping parsing");
+                            continue;
+                        }
+                            
+                        try
+                        {
+                            var response = JsonUtility.FromJson<OpenRouterResponse>(jsonData);
+                            if (response?.choices != null && response.choices.Count > 0)
+                            {
+                                var deltaContent = response.choices[0].delta?.content;
+                                if (!string.IsNullOrEmpty(deltaContent))
+                                {
+                                    contentBuilder.Append(deltaContent);
+                                    if (debugRequests)
+                                    {
+                                        Debug.Log($"[OpenRouter] SSE chunk: '{deltaContent}'");
+                                    }
+                                }
+                            }
+                        }
+                        catch (Exception e)
+                        {
+                            Debug.LogWarning($"[OpenRouter] Failed to parse SSE chunk: {e.Message}");
+                            Debug.LogWarning($"[OpenRouter] Chunk data: {jsonData}");
+                        }
+                    }
+                }
+                
+                var finalContent = contentBuilder.ToString();
+                if (string.IsNullOrWhiteSpace(finalContent))
+                {
+                    Debug.LogWarning("[OpenRouter] No content extracted from SSE response");
+                    return "Error: No content received from streaming response";
+                }
+                
+                Debug.Log($"[OpenRouter] Extracted content from SSE ({finalContent.Length} chars): {finalContent.Substring(0, System.Math.Min(200, finalContent.Length))}...");
+                return finalContent;
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[OpenRouter] Failed to parse SSE response: {e.Message}");
+                return $"Error: Failed to parse streaming response - {e.Message}";
+            }
+        }
+
+        private string HandleHttpError(UnityWebRequest webRequest)
     {
         string responseBody = webRequest.downloadHandler?.text ?? "";
         
-        if (debugRequests && !string.IsNullOrEmpty(responseBody))
-        {
-            Debug.LogError($"[OpenRouter] Error response body: {responseBody}");
-        }
-
-        // Try to parse error response
+        // Always log error responses for debugging
+        Debug.LogError($"[OpenRouter] HTTP Error {webRequest.responseCode}: {webRequest.error}");
+        
         if (!string.IsNullOrEmpty(responseBody))
         {
+            // Log raw response body for debugging
+            Debug.LogError($"[OpenRouter] Error response body: {responseBody.Substring(0, System.Math.Min(1000, responseBody.Length))}...");
+            
+            // Check if error response is HTML
+            if (responseBody.TrimStart().StartsWith("<") || responseBody.Contains("<html"))
+            {
+                Debug.LogError("[OpenRouter] Received HTML error page instead of JSON error");
+                // Try to extract meaningful info from HTML
+                if (responseBody.Contains("403") || responseBody.Contains("Forbidden"))
+                {
+                    return "Error: Access forbidden. Please check your API key and permissions.";
+                }
+                else if (responseBody.Contains("401") || responseBody.Contains("Unauthorized"))
+                {
+                    return "Error: Invalid API key. Please check your OpenRouter API key.";
+                }
+                else
+                {
+                    return $"Error: Server returned HTML error page (Status {webRequest.responseCode})";
+                }
+            }
+
+            // Try to parse JSON error response
             try
             {
                 var errorResponse = JsonUtility.FromJson<OpenRouterErrorResponse>(responseBody);
                 if (errorResponse?.error != null)
                 {
                     Debug.LogError($"[OpenRouter] API Error: {errorResponse.error.message}");
+                    return $"API Error: {errorResponse.error.message}";
                 }
             }
             catch
             {
-                // Ignore JSON parsing errors for error responses
+                Debug.LogWarning("[OpenRouter] Could not parse error response as JSON");
             }
         }
 
