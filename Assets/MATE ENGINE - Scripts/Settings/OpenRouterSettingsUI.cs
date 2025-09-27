@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using System.Collections.Generic;
+using System.IO;
 
 public class OpenRouterSettingsUI : MonoBehaviour
 {
@@ -16,6 +17,7 @@ public class OpenRouterSettingsUI : MonoBehaviour
     public Toggle debugToggle;
     public Button saveButton;
     public Button testConnectionButton;
+    public Button openSettingsFileButton;
     public Text statusText;
     
     [Header("System Prompt")]
@@ -99,6 +101,9 @@ public class OpenRouterSettingsUI : MonoBehaviour
             
         if (testConnectionButton != null)
             testConnectionButton.onClick.AddListener(TestConnection);
+
+        if (openSettingsFileButton != null)
+            openSettingsFileButton.onClick.AddListener(OpenSettingsFile);
             
         if (resetPromptButton != null)
             resetPromptButton.onClick.AddListener(ResetSystemPrompt);
@@ -514,5 +519,57 @@ public class OpenRouterSettingsUI : MonoBehaviour
 
         // Save the defaults
         SaveSettings();
+    }
+
+    private string GetSettingsFilePath()
+    {
+        return Path.Combine(Application.persistentDataPath, "settings.json");
+    }
+
+    public void OpenSettingsFile()
+    {
+        try
+        {
+            string path = GetSettingsFilePath();
+
+            if (!File.Exists(path))
+            {
+                if (SaveLoadHandler.Instance != null)
+                {
+                    SaveLoadHandler.Instance.SaveToDisk();
+                }
+                else
+                {
+                    string directory = Path.GetDirectoryName(path);
+                    if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                    {
+                        Directory.CreateDirectory(directory);
+                    }
+                    File.WriteAllText(path, "{}");
+                }
+            }
+
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = path,
+                UseShellExecute = true
+            });
+#elif UNITY_STANDALONE_OSX
+            System.Diagnostics.Process.Start("open", path);
+#elif UNITY_STANDALONE_LINUX
+            System.Diagnostics.Process.Start("xdg-open", path);
+#else
+            UpdateStatus("This platform does not support opening files directly.");
+            return;
+#endif
+
+            UpdateStatus("settings.json 파일을 열었습니다.");
+        }
+        catch (System.Exception ex)
+        {
+            UpdateStatus($"파일 열기에 실패했습니다: {ex.Message}");
+            UnityEngine.Debug.LogError($"[OpenRouterSettingsUI] Failed to open settings file: {ex}");
+        }
     }
 }
