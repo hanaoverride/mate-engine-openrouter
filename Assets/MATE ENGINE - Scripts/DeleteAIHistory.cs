@@ -86,19 +86,11 @@ public class DeleteAIHistory : MonoBehaviour
     {
         bool deleted = false;
         string openRouterJsonPath = Path.Combine(Application.persistentDataPath, openRouterFileName + ".json");
-        string openRouterPromptPath = Path.Combine(Application.persistentDataPath, "OpenRouter_prompt.txt");
 
         if (File.Exists(openRouterJsonPath))
         {
             File.Delete(openRouterJsonPath);
             Debug.Log("[DeleteAIHistory] Deleted OpenRouter history: " + openRouterJsonPath);
-            deleted = true;
-        }
-
-        if (File.Exists(openRouterPromptPath))
-        {
-            File.Delete(openRouterPromptPath);
-            Debug.Log("[DeleteAIHistory] Deleted OpenRouter prompt: " + openRouterPromptPath);
             deleted = true;
         }
         
