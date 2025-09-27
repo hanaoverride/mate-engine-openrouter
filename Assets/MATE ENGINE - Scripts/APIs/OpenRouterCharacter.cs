@@ -54,24 +54,34 @@ public class OpenRouterCharacter : MonoBehaviour
     private List<OpenRouterMessage> chatHistory = new List<OpenRouterMessage>();
     private System.Threading.SemaphoreSlim chatLock = new System.Threading.SemaphoreSlim(1, 1);
     private bool isProcessing = false;
+    private bool isInitialized = false;
 
     void Start()
     {
+        EnsureInitialized();
+    }
+
+    public void EnsureInitialized()
+    {
+        if (isInitialized)
+        {
+            return;
+        }
+
         // Get or create OpenRouterClient
         client = gameObject.GetComponent<OpenRouterClient>();
         if (client == null)
         {
             client = gameObject.AddComponent<OpenRouterClient>();
         }
-        
+
         // Load system prompt and chat history
         LoadSystemPrompt();
         LoadHistory();
-        
-        // Initialize with system prompt
+
+        // Ensure system prompt is first message
         if (!string.IsNullOrEmpty(systemPrompt))
         {
-            // Check if system message already exists
             if (chatHistory.Count == 0 || chatHistory[0].role != "system")
             {
                 chatHistory.Insert(0, new OpenRouterMessage
@@ -80,7 +90,13 @@ public class OpenRouterCharacter : MonoBehaviour
                     content = systemPrompt
                 });
             }
+            else
+            {
+                chatHistory[0].content = systemPrompt;
+            }
         }
+
+        isInitialized = true;
     }
 
     public void AddMessage(string role, string content)
@@ -196,7 +212,9 @@ public class OpenRouterCharacter : MonoBehaviour
             return emptyMessage;
         }
 
-        // Show processing status
+    EnsureInitialized();
+
+    // Show processing status
         ShowUserInfo("Sending message...");
 
         await chatLock.WaitAsync();
@@ -309,6 +327,7 @@ public class OpenRouterCharacter : MonoBehaviour
 
     private List<OpenRouterMessage> PrepareMessagesForAPI()
     {
+        EnsureInitialized();
         var messages = new List<OpenRouterMessage>();
         
         // Add system message if present
@@ -378,6 +397,21 @@ public class OpenRouterCharacter : MonoBehaviour
     public int GetHistoryCount()
     {
         return chatHistory.Count;
+    }
+
+    public IReadOnlyList<OpenRouterMessage> GetChatHistory(bool includeSystem = false)
+    {
+        EnsureInitialized();
+        if (includeSystem)
+        {
+            return chatHistory.AsReadOnly();
+        }
+
+        // Return a filtered copy excluding system messages
+        var filtered = chatHistory
+            .Where(m => !string.Equals(m.role, "system", System.StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        return filtered;
     }
 
     public bool IsProcessing()

@@ -3,6 +3,7 @@ using UnityEngine.Networking;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using System;
+using System.Text;
 
 [Serializable]
 public class OpenRouterMessage
@@ -511,9 +512,162 @@ public class OpenRouterClient : MonoBehaviour
 
     private async Task<string> ProcessStreamingResponse(UnityWebRequest webRequest, Action<string> onChunk)
     {
-        // Implementation for streaming would go here
-        // For now, fallback to non-streaming
-        return await ProcessNonStreamingResponse(webRequest);
+        var operation = webRequest.SendWebRequest();
+        var buffer = webRequest.downloadHandler as DownloadHandlerBuffer;
+        if (buffer == null)
+        {
+            buffer = new DownloadHandlerBuffer();
+            webRequest.downloadHandler = buffer;
+            operation = webRequest.SendWebRequest();
+        }
+
+        StringBuilder fullResponse = new StringBuilder();
+        string pending = string.Empty;
+        int lastProcessedLength = 0;
+        bool doneReceived = false;
+
+        while (!operation.isDone)
+        {
+            if (buffer != null)
+            {
+                string text = buffer.text;
+                if (!string.IsNullOrEmpty(text) && text.Length > lastProcessedLength)
+                {
+                    string segment = text.Substring(lastProcessedLength);
+                    lastProcessedLength = text.Length;
+                    if (ProcessSseSegment(segment, onChunk, fullResponse, ref pending))
+                    {
+                        doneReceived = true;
+                        webRequest.Abort();
+                        break;
+                    }
+                }
+            }
+            await Task.Delay(10);
+        }
+
+        if (buffer != null)
+        {
+            string text = buffer.text;
+            if (!string.IsNullOrEmpty(text) && text.Length > lastProcessedLength)
+            {
+                if (ProcessSseSegment(text.Substring(lastProcessedLength), onChunk, fullResponse, ref pending))
+                {
+                    doneReceived = true;
+                }
+            }
+        }
+
+        if (doneReceived || webRequest.result == UnityWebRequest.Result.Success)
+        {
+            if (fullResponse.Length > 0)
+            {
+                return fullResponse.ToString();
+            }
+
+            // Fallback: try to parse any accumulated SSE buffer into a response
+            string accumulated = buffer?.text;
+            if (!string.IsNullOrEmpty(accumulated))
+            {
+                string parsed = ParseSSEResponse(accumulated);
+                return parsed;
+            }
+
+            return string.Empty;
+        }
+
+        if (webRequest.result == UnityWebRequest.Result.ProtocolError || webRequest.result == UnityWebRequest.Result.ConnectionError)
+        {
+            return HandleHttpError(webRequest);
+        }
+
+        if (!string.IsNullOrEmpty(webRequest.error))
+        {
+            Debug.LogError($"[OpenRouter] Streaming error: {webRequest.error}");
+            return $"Error: {webRequest.error}";
+        }
+
+        return fullResponse.Length > 0 ? fullResponse.ToString() : "Error: Streaming request ended unexpectedly.";
+    }
+
+    private bool ProcessSseSegment(string segment, Action<string> onChunk, StringBuilder fullResponse, ref string pending)
+    {
+        bool doneReceived = false;
+        pending += segment;
+
+        while (TryExtractSseEvent(ref pending, out string eventBlock))
+        {
+            var lines = eventBlock.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var rawLine in lines)
+            {
+                string line = rawLine.Trim();
+                if (string.IsNullOrEmpty(line) || !line.StartsWith("data:"))
+                {
+                    continue;
+                }
+
+                string payload = line.Substring(5).Trim();
+                if (string.IsNullOrEmpty(payload))
+                {
+                    continue;
+                }
+
+                if (payload == "[DONE]")
+                {
+                    doneReceived = true;
+                    break;
+                }
+
+                try
+                {
+                    var streamResponse = JsonUtility.FromJson<OpenRouterStreamResponse>(payload);
+                    if (streamResponse?.choices != null && streamResponse.choices.Count > 0)
+                    {
+                        var choice = streamResponse.choices[0];
+                        string deltaContent = choice.delta != null ? choice.delta.content : null;
+                        if (!string.IsNullOrEmpty(deltaContent))
+                        {
+                            fullResponse.Append(deltaContent);
+                            onChunk?.Invoke(fullResponse.ToString());
+                        }
+                    }
+                }
+                catch (Exception e)
+                {
+                    Debug.LogWarning($"[OpenRouter] Failed to parse streaming chunk: {e.Message}");
+                    Debug.LogWarning($"[OpenRouter] Chunk payload: {payload}");
+                }
+            }
+
+            if (doneReceived)
+            {
+                break;
+            }
+        }
+
+        return doneReceived;
+    }
+
+    private bool TryExtractSseEvent(ref string buffer, out string eventBlock)
+    {
+        int delimiterIndex = buffer.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+        int delimiterLength = 4;
+
+        if (delimiterIndex < 0)
+        {
+            delimiterIndex = buffer.IndexOf("\n\n", StringComparison.Ordinal);
+            delimiterLength = 2;
+        }
+
+        if (delimiterIndex < 0)
+        {
+            eventBlock = null;
+            return false;
+        }
+
+        eventBlock = buffer.Substring(0, delimiterIndex);
+        buffer = buffer.Substring(delimiterIndex + delimiterLength);
+        return true;
     }
 
     public void CancelAllRequests()

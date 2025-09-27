@@ -16,6 +16,7 @@ public class SettingsHandlerButtons : MonoBehaviour
     public SettingsHandlerLights lightsHandler;
     public SettingsHandlerAccessory accessoryHandler;
     public SettingsHandlerBigScreen bigScreenHandler;
+    public OpenRouterSettingsUI openRouterHandler;
 
     public VRMLoader vrmLoader;
     public GameObject uniWindowControllerObject;
@@ -43,6 +44,7 @@ public class SettingsHandlerButtons : MonoBehaviour
         lightsHandler?.ApplySettings();
         accessoryHandler?.ApplySettings();
         bigScreenHandler?.ApplySettings();
+        openRouterHandler?.SaveSettings();
         SaveLoadHandler.Instance.SaveToDisk();
         SaveLoadHandler.ApplyAllSettingsToAllAvatars();
     }
@@ -57,6 +59,7 @@ public class SettingsHandlerButtons : MonoBehaviour
         lightsHandler?.ResetAllLightTogglesToDefault();
         accessoryHandler?.ResetToDefaults();
         bigScreenHandler?.ResetToDefaults();
+        openRouterHandler?.ResetToDefaults();
         if (vrmLoader != null) vrmLoader.ResetModel();
         SaveLoadHandler.Instance.SaveToDisk();
     }

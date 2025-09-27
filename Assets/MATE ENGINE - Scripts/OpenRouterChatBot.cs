@@ -20,6 +20,7 @@ public class OpenRouterChatBot : ChatBot
     
     private OpenRouterCharacter openRouterCharacter;
     private bool isOpenRouterInitialized = false;
+    private bool hasDisplayedOpenRouterHistory = false;
 
     protected override void Start()
     {
@@ -86,6 +87,7 @@ public class OpenRouterChatBot : ChatBot
         // Conditional initialization based on provider
         if (useOpenRouter && isOpenRouterInitialized)
         {
+            DisplayOpenRouterHistory();
             // Skip LLM warmup, go directly to ready state
             WarmUpCallback();
         }
@@ -117,6 +119,7 @@ public class OpenRouterChatBot : ChatBot
         {
             openRouterCharacter = gameObject.AddComponent<OpenRouterCharacter>();
         }
+        openRouterCharacter.EnsureInitialized();
         
         // Configure OpenRouterCharacter to use the same chat container
         openRouterCharacter.chatContainer = chatContainer;
@@ -128,8 +131,9 @@ public class OpenRouterChatBot : ChatBot
             openRouterCharacter.SetModel(openRouterModel);
         }
         
-        isOpenRouterInitialized = true;
-        Debug.Log("[OpenRouterChatBot] OpenRouter initialized successfully");
+    isOpenRouterInitialized = true;
+    hasDisplayedOpenRouterHistory = false;
+    Debug.Log("[OpenRouterChatBot] OpenRouter initialized successfully");
     }
 
     private void LoadOpenRouterSettings()
@@ -244,6 +248,11 @@ public class OpenRouterChatBot : ChatBot
                 return;
             }
             useOpenRouter = true;
+            if (!isOpenRouterInitialized)
+            {
+                InitializeOpenRouter();
+            }
+            DisplayOpenRouterHistory();
             AddBubble($"Switched to OpenRouter ({openRouterModel})", false);
         }
         else if (command.StartsWith("/apikey "))
@@ -291,6 +300,8 @@ public class OpenRouterChatBot : ChatBot
 
     private async void HandleOpenRouterMessage(string message)
     {
+        inputBubble.SetText("");
+
         if (openRouterCharacter == null)
         {
             AddBubble("OpenRouter not properly initialized", false);
@@ -298,9 +309,9 @@ public class OpenRouterChatBot : ChatBot
             return;
         }
 
-        blockInput = true;
+    blockInput = true;
 
-        // Add user bubble using original method
+    // Add user bubble using original method
         AddBubble(message, true);
         var aiBubble = AddBubble("...", false);
 
@@ -334,6 +345,33 @@ public class OpenRouterChatBot : ChatBot
         inputBubble.SetText("");
     }
 
+    private void DisplayOpenRouterHistory()
+    {
+        if (!useOpenRouter || hasDisplayedOpenRouterHistory || openRouterCharacter == null)
+        {
+            return;
+        }
+
+        var history = openRouterCharacter.GetChatHistory();
+        if (history == null)
+        {
+            return;
+        }
+
+        foreach (var entry in history)
+        {
+            if (entry == null || string.IsNullOrEmpty(entry.content))
+            {
+                continue;
+            }
+
+            bool isUserMessage = string.Equals(entry.role, "user", System.StringComparison.OrdinalIgnoreCase);
+            AddBubble(entry.content, isUserMessage);
+        }
+
+        hasDisplayedOpenRouterHistory = true;
+    }
+
     // Public method to switch providers (can be called from UI buttons)
     public void SwitchToZomeAI()
     {
@@ -354,6 +392,7 @@ public class OpenRouterChatBot : ChatBot
         useOpenRouter = true;
         SaveOpenRouterSettings();
         UpdateStatusText();
+        DisplayOpenRouterHistory();
         AddBubble($"Switched to OpenRouter ({openRouterModel})", false);
     }
 
@@ -364,9 +403,13 @@ public class OpenRouterChatBot : ChatBot
         SaveOpenRouterSettings();
         UpdateStatusText();
         
-        if (enabled && !isOpenRouterInitialized)
+        if (enabled)
         {
-            InitializeOpenRouter();
+            if (!isOpenRouterInitialized)
+            {
+                InitializeOpenRouter();
+            }
+            DisplayOpenRouterHistory();
         }
         
         Debug.Log($"[OpenRouterChatBot] OpenRouter {(enabled ? "enabled" : "disabled")}");

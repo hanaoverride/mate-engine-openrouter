@@ -462,4 +462,57 @@ public class OpenRouterSettingsUI : MonoBehaviour
             }
         }
     }
+
+    public void ResetToDefaults()
+    {
+        // Reset to default values
+        if (enableOpenRouterToggle != null)
+        {
+            enableOpenRouterToggle.isOn = true; // Default to enabled
+        }
+
+        if (apiKeyField != null)
+        {
+            apiKeyField.text = ""; // Clear API key
+        }
+
+        if (modelDropdown != null)
+        {
+            // Find index of default model
+            var modelKeys = new List<string>(availableModels.Keys);
+            int defaultIndex = modelKeys.IndexOf("deepseek/deepseek-chat-v3.1");
+            if (defaultIndex >= 0)
+            {
+                modelDropdown.value = defaultIndex;
+            }
+        }
+
+        if (temperatureSlider != null)
+        {
+            temperatureSlider.value = 0.7f;
+            OnTemperatureChanged(0.7f);
+        }
+
+        if (maxTokensSlider != null)
+        {
+            maxTokensSlider.value = 1000f;
+            OnMaxTokensChanged(1000f);
+        }
+
+        if (streamingToggle != null)
+        {
+            streamingToggle.isOn = true;
+        }
+
+        if (debugToggle != null)
+        {
+            debugToggle.isOn = false;
+        }
+
+        // Reset system prompt
+        ResetSystemPrompt();
+
+        // Save the defaults
+        SaveSettings();
+    }
 }
