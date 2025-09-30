@@ -23,6 +23,9 @@ public class OpenRouterSettingsUI : MonoBehaviour
     [Header("System Prompt")]
     public InputField systemPromptField;
     public Button resetPromptButton;
+    public Button openPromptFileButton;
+
+    private const string DefaultSystemPrompt = "You are a helpful AI assistant for a desktop pet application. Be friendly, concise, and engaging.";
 
     [Header("Available Models")]
     private readonly Dictionary<string, string> availableModels = new Dictionary<string, string>
@@ -104,6 +107,9 @@ public class OpenRouterSettingsUI : MonoBehaviour
 
         if (openSettingsFileButton != null)
             openSettingsFileButton.onClick.AddListener(OpenSettingsFile);
+
+        if (openPromptFileButton != null)
+            openPromptFileButton.onClick.AddListener(OpenPromptFile);
             
         if (resetPromptButton != null)
             resetPromptButton.onClick.AddListener(ResetSystemPrompt);
@@ -421,9 +427,13 @@ public class OpenRouterSettingsUI : MonoBehaviour
     {
         if (systemPromptField != null)
         {
-            string defaultPrompt = "You are a helpful AI assistant for a desktop pet application. Be friendly, concise, and engaging.";
-            systemPromptField.text = defaultPrompt;
+            systemPromptField.text = DefaultSystemPrompt;
         }
+    }
+
+    private string GetPromptFilePath()
+    {
+        return Path.Combine(Application.persistentDataPath, "OpenRouter_prompt.txt");
     }
 
     private void UpdateStatus(string message)
@@ -524,6 +534,51 @@ public class OpenRouterSettingsUI : MonoBehaviour
     private string GetSettingsFilePath()
     {
         return Path.Combine(Application.persistentDataPath, "settings.json");
+    }
+
+    public void OpenPromptFile()
+    {
+        try
+        {
+            string path = GetPromptFilePath();
+
+            if (!File.Exists(path))
+            {
+                string directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+
+                string promptToWrite = systemPromptField != null && !string.IsNullOrWhiteSpace(systemPromptField.text)
+                    ? systemPromptField.text
+                    : DefaultSystemPrompt;
+
+                File.WriteAllText(path, promptToWrite);
+            }
+
+#if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = path,
+                UseShellExecute = true
+            });
+#elif UNITY_STANDALONE_OSX
+            System.Diagnostics.Process.Start("open", path);
+#elif UNITY_STANDALONE_LINUX
+            System.Diagnostics.Process.Start("xdg-open", path);
+#else
+            UpdateStatus("This platform does not support opening files directly.");
+            return;
+#endif
+
+            UpdateStatus("OpenRouter_prompt.txt 파일을 열었습니다.");
+        }
+        catch (System.Exception ex)
+        {
+            UpdateStatus($"프롬프트 파일 열기에 실패했습니다: {ex.Message}");
+            Debug.LogError($"[OpenRouterSettingsUI] Failed to open prompt file: {ex}");
+        }
     }
 
     public void OpenSettingsFile()

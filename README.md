@@ -43,3 +43,12 @@ Yes, env vars still work. Drop `OpenRouter_API_Key`, `OpenRouter_Model`, `OpenRo
 - The `settings.json` shortcut only opens on Windows/macOS/Linux. Everywhere else you'll just get a polite failure message.
 - All UI fields are still legacy `UnityEngine.UI` bits. If you migrate to TextMeshPro, you'll have to redo the bindings yourself.
 - The codebase is still very much under construction. This README will keep changing—if something looks broken, start here.
+
+# How to run it
+- run the game for the first time, right-click the chararcter, and select settings icon.
+- scroll until you see "OPENROUTER SETTINGS SECTIONS". click "EDIT" button to open the settings file.
+- fill in your OpenRouter API key, and optionally change the model to something else.
+- save the file.
+- next, click "EDIT SYSTEM PROMPT" button to open the system prompt file.
+- edit the system prompt to your liking, save the file.
+- close the game, and run it again.

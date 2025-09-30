@@ -143,7 +143,7 @@ public class SaveLoadHandler : MonoBehaviour
         public string openRouterApiKey = string.Empty;
         public string openRouterModel = "deepseek/deepseek-chat-v3.1";
         public float openRouterTemperature = 0.7f;
-        public float openRouterMaxTokens = 1000f;
+        public float openRouterMaxTokens = 16000f;
         public bool openRouterStreaming = true;
         public bool openRouterDebug = false;
     }
